@@ -1,0 +1,24 @@
+{
+  "name": "hackathon-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "企业黑客松大赛实时驾驶舱大屏（Node.js 全栈 + SQLite）",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "seed": "node scripts/seed.js",
+    "demo": "node scripts/demo-data.js",
+    "smoke": "node scripts/smoke.js",
+    "verify:e2e": "node scripts/verify-e2e.js",
+    "deploy:e2e": "node scripts/deploy-e2e.js",
+    "dev:server": "node --watch server/src/index.js",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "start": "node server/src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

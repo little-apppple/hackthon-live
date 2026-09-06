@@ -1,0 +1,10 @@
+{
+  "serverUrl": "http://192.168.1.100:3000",
+  "accessKey": "管理员生成 accesskey 后会替换此字段",
+  "deployUrl": "http://192.168.1.100:4100",
+  "deploy": { "type": "node", "start": "npm start", "install": true, "dir": "." },
+  "verify": {
+    "api": "npm run test:api",
+    "e2e": "npm run test:e2e"
+  }
+}
