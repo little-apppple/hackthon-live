@@ -2,7 +2,7 @@
 
 Node.js 全栈（Express + node:sqlite + Vite/React/ECharts）的黑客松现场驾驶舱：**多期活动数据完全隔离**，大屏实时展示 **部门 → 小组 → 项目** 三级进度，项目通过 **上报 Skill** 自动汇报 7 个流程节点、`--deploy` 自动部署到预留端口、`--verify` 自动化线上验收。SQLite 使用 Node 22.5+ 内置的 `node:sqlite`，无需任何原生编译。
 
-完整需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)。
+完整需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，**分角色使用手册见 [docs/USERGUIDE.md](docs/USERGUIDE.md)**（管理员 / 参赛小组 / 评委观众）。
 
 ## 目录结构
 
