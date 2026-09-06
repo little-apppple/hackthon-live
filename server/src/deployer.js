@@ -409,7 +409,22 @@ function recoverOnBoot() {
       if (!project) continue;
       const state = ensureState(project);
       state.lastDeployAt = meta.deployedAt;
+      killPortListener(project.port); // 防 kill -9 等绕过进程组清理的残留
       startByType(project, meta, state);
+      // 异步探活收敛状态（不阻塞其他项目的恢复）
+      (async () => {
+        const deadline = Date.now() + config.deployStartTimeoutMs;
+        while (Date.now() < deadline && state.status === 'starting') {
+          const probe = await probeLocalPort(project.port);
+          if (probe.ok) {
+            state.status = 'running';
+            state.startedAt = Date.now();
+            return;
+          }
+          await sleep(1500);
+        }
+        if (state.status === 'starting') state.status = 'failed';
+      })();
       console.log(`[deployer] 已恢复部署：项目 #${project.id}「${project.name}」→ 端口 ${project.port}`);
     } catch (e) {
       console.error(`[deployer] 恢复 ${name} 失败: ${e.message}`);

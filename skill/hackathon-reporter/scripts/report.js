@@ -115,7 +115,9 @@ function loadConfig(file) {
 }
 
 async function callApi(cfg, urlPath, options) {
-  const res = await fetch(cfg.serverUrl.replace(/\/$/, '') + urlPath, options);
+  // 小 JSON 请求默认 20s 超时：服务端挂起时让网络重试机制有机会接管
+  const opts = { signal: AbortSignal.timeout(20000), ...options };
+  const res = await fetch(cfg.serverUrl.replace(/\/$/, '') + urlPath, opts);
   let body = null;
   try {
     body = await res.json();
@@ -241,7 +243,14 @@ async function cmdNext(args, cfg) {
   }
 
   const guide = STAGE_GUIDE[status.nextStage.id];
-  console.log(`\n▶ 下一节点 ${status.nextStage.index}. ${guide.name} (${status.nextStage.id})`);
+  console.log(`\n▶ 下一节点 ${status.nextStage.index}. ${status.nextStage.name} (${status.nextStage.id})`);
+  if (!guide) {
+    // 新旧版本短暂混跑时的兜底：服务端有、本地指引表没有的节点
+    console.log('  完成标准: 见赛事说明（本地指引表未收录该节点）');
+    console.log('  完成后执行:');
+    console.log(`    node report.js --stage ${status.nextStage.id} --message "一句话成果"`);
+    process.exit(0);
+  }
   console.log(`  完成标准: ${guide.done}`);
   console.log('  建议动作:');
   guide.tips.forEach((t) => console.log(`    - ${t}`));
