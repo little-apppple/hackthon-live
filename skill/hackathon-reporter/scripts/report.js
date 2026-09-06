@@ -13,15 +13,34 @@ const os = require('os');
 const { spawn, execSync } = require('child_process');
 
 const USAGE = `用法:
+  node report.js --init [--server-url <地址> --access-key <密钥>] [--deploy-url <地址>] [--force]
   node report.js --next [--config <路径>]
   node report.js --stage <节点标识|序号> [--message "说明"] [--config <路径>]
   node report.js --status [--config <路径>]
   node report.js --deploy [--dir <目录>] [--type node|static] [--start <命令>] [--no-install] [--config <路径>]
   node report.js --verify [--url <部署地址>] [--dry] [--config <路径>]
 节点: requirements(1) design(2) prototype(3) coding(4) testing(5) deployment(6) acceptance(7)
+--init: 首次接入：生成 hackathon.config.json（缺参时进入交互问答），完成后自动展示第一个工作项
 --next: 查看下一节点工作项（工作循环入口：--next → 干活 → 上报 → 再 --next）
 --deploy: 打包并上传到服务端自动部署到预留端口，探活通过后自动上报「上线部署」
 --verify: 探活 + 接口测试 + E2E 全部通过后自动上报「线上验收」（退出码 3 = 验证未通过）`;
+
+const ONBOARDING = `── 首次使用接入引导 ──────────────────────────────
+本 skill 驱动你的比赛全流程，接入只需两步：
+
+① 向赛事管理员索取两样东西：
+   - 赛事服务端地址（形如 http://<服务器IP>:<端口>）
+   - 本项目的 accessKey（hk_ 开头，报名后由管理员发放）
+
+② 在项目根目录执行自动配置：
+   node report.js --init
+   （交互式问答；也可一次性带参：
+     node report.js --init --server-url http://… --access-key hk_…）
+
+配置完成后执行 node report.js --next 即可开始比赛流程：
+  --next 查看下一节点工作项 → 干活 → 按给出的命令上报 → 再 --next
+  七个节点：需求分析→方案设计→原型设计→代码开发→本地测试→上线部署→线上验收
+──────────────────────────────────────────────`;
 
 // 每个节点的工作项指引（与服务端节点定义对齐）
 const STAGE_GUIDE = {
@@ -77,6 +96,11 @@ function parseArgs(argv) {
     else if (a === '--message') args.message = argv[++i];
     else if (a === '--status') args.status = true;
     else if (a === '--next') args.next = true;
+    else if (a === '--init') args.init = true;
+    else if (a === '--server-url') args.serverUrl = argv[++i];
+    else if (a === '--access-key') args.accessKey = argv[++i];
+    else if (a === '--deploy-url') args.deployUrl = argv[++i];
+    else if (a === '--force') args.force = true;
     else if (a === '--verify') args.verify = true;
     else if (a === '--deploy') args.deploy = true;
     else if (a === '--url') args.url = argv[++i];
@@ -98,7 +122,8 @@ function parseArgs(argv) {
 function loadConfig(file) {
   const p = path.resolve(process.cwd(), file);
   if (!fs.existsSync(p)) {
-    console.error(`✗ 未找到配置文件: ${p}\n  请向赛事管理员索取 accesskey，并把 hackathon.config.json 放到项目根目录。`);
+    console.error(`✗ 未找到配置文件: ${p}`);
+    console.error(ONBOARDING);
     process.exit(1);
   }
   try {
@@ -146,6 +171,7 @@ async function callApiWithRetry(cfg, urlPath, options, attempts = 3) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.init) return cmdInit(args);
   const cfg = loadConfig(args.config);
 
   if (args.verify) {
@@ -215,6 +241,60 @@ async function main() {
   } catch {
     networkError();
   }
+}
+
+// ---------- 首次接入：--init 生成配置并展示第一个工作项 ----------
+
+async function ask(rl, question) {
+  return rl.question(question);
+}
+
+async function cmdInit(args) {
+  const target = path.resolve(process.cwd(), 'hackathon.config.json');
+  if (fs.existsSync(target) && !args.force) {
+    console.log('✓ 已存在 hackathon.config.json，无需重复初始化。');
+    console.log('  如需覆盖重新生成：node report.js --init --force');
+    return cmdNext(args, loadConfig(args.config));
+  }
+
+  let serverUrl = args.serverUrl;
+  let accessKey = args.accessKey;
+  let deployUrl = args.deployUrl;
+
+  if (!serverUrl || !accessKey) {
+    console.log('== 黑客松 skill 首次接入 ==');
+    console.log('需要两样东西（向赛事管理员索取）：服务端地址、本项目 accessKey\n');
+    const readline = require('readline/promises');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      if (!serverUrl) serverUrl = await ask(rl, '① 赛事服务端地址（如 http://47.108.217.153:50000）: ');
+      if (!accessKey) accessKey = await ask(rl, '② 本项目 accessKey（hk_ 开头）: ');
+      if (!deployUrl) {
+        const d = (await ask(rl, '③ 部署地址 deployUrl（可选，分配端口确认后填，回车跳过）: ')).trim();
+        if (d) deployUrl = d;
+      }
+    } finally {
+      rl.close();
+    }
+  }
+
+  serverUrl = String(serverUrl || '').trim().replace(/\/+$/, '');
+  accessKey = String(accessKey || '').trim();
+  if (!/^https?:\/\//.test(serverUrl)) {
+    console.error('✗ 服务端地址需以 http:// 或 https:// 开头');
+    process.exit(2);
+  }
+  if (!accessKey.startsWith('hk_')) {
+    console.error('✗ accessKey 应以 hk_ 开头，请核对管理员发放的内容');
+    process.exit(2);
+  }
+
+  const cfg = { serverUrl, accessKey };
+  if (deployUrl) cfg.deployUrl = String(deployUrl).trim();
+  fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + '\n');
+  console.log(`\n✓ 已生成 ${target}`);
+  console.log('  接下来进入工作循环：--next 查看工作项 → 干活 → 按给出的命令上报 → 再 --next\n');
+  return cmdNext(args, cfg);
 }
 
 // ---------- 工作循环：--next 返回下一节点工作项 ----------

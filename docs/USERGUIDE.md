@@ -65,10 +65,18 @@
 ### 2.1 你会拿到什么
 
 1. 一个 **accesskey**（`hk_` 开头的字符串）；
-2. 一份配置文件模板（或直接拿到现成的 `hackathon.config.json`）；
+2. 赛事服务端地址（即大屏地址）；
 3. 上报技能目录 `hackathon-reporter/`（装进你的 AI 编程 Agent 的技能库）。
 
-把配置放到**参赛项目根目录**：
+在**参赛项目根目录**执行一条命令完成接入（交互式问答，Agent 也可代填参数）：
+
+```bash
+node report.js --init
+# 或一次性带参：
+node report.js --init --server-url http://47.108.217.153:50000 --access-key hk_你的密钥
+```
+
+生成的 `hackathon.config.json` 会长这样（可手动补充部署与验收配置）：
 
 ```json
 {
