@@ -13,7 +13,7 @@ description: 黑客松参赛项目进度自动上报与线上验收。当参赛�
 
 ```json
 {
-  "serverUrl": "http://<大屏服务器>:3000",
+  "serverUrl": "http://<大屏服务器>:<端口>",
   "accessKey": "hk_xxxx...",
   "deployUrl": "http://<大屏服务器>:<分配端口>"
 }
@@ -58,7 +58,7 @@ node <skill目录>/scripts/report.js --verify --dry   # 只验证不上报
 
 `--deploy` 由服务端代为部署，不再需要小组自己登录服务器起进程：
 
-1. **打包**：把项目目录打成 tgz（自动排除 `node_modules`、`.git`），打包目录用 `--dir` 指定（默认项目根；纯前端项目传 `--dir dist`）；
+1. **打包**：把项目目录打成 tgz（自动排除 `node_modules`、`.git` 和 `hackathon.config.json`——配置含 accessKey，绝不进入部署产物），打包目录用 `--dir` 指定（默认项目根；纯前端项目传 `--dir dist`）；
 2. **上传**：POST 到服务端 `/api/deploy`（accesskey 鉴权，上限默认 200MB）；
 3. **起服**：服务端解压到 `deploys/<项目ID>/`，node 类型按需先 `npm install --omit=dev`，再以 `PORT=<预留端口>` 启动；static 类型由服务端直接托管静态文件；
 4. **探活**：60 秒内探活预留端口，通过后**自动上报「上线部署」节点**（证据入审计表），大屏链接点亮；失败则返回错误和应用日志末尾，不会上报。
@@ -102,7 +102,7 @@ node <skill目录>/scripts/report.js --verify --dry   # 只验证不上报
 }
 ```
 
-部署地址的确定顺序：`--url` 参数 > 配置 `deployUrl` > 服务端 status 返回的预留端口（`http://localhost:<port>`）。
+部署地址的确定顺序：`--url` 参数 > 配置 `verify.url` > 配置 `deployUrl` > 服务端 status 返回的预留端口（`http://localhost:<port>`，仅当应用在本机运行时可用）。
 
 **Agent 职责**：部署完成后，为项目补齐 `verify.api` / `verify.e2e` 两个 npm 脚本（至少各写一条覆盖核心流程的用例），然后执行 `--verify`。若失败，读输出修复项目代码或测试后重试，**不要**为了让验证通过而删测试、改断言或绕过检查。
 
@@ -131,5 +131,6 @@ node <skill目录>/scripts/report.js --verify --dry   # 只验证不上报
 
 ## 部署说明（第 6 节点）
 
-- 每个项目的部署端口在发放 accesskey 时已分配（见管理员发放的配置），把应用监听端口改为该端口后再上报 `deployment`。
+- **`--deploy` 路径（推荐）**：无需关心端口——服务端解压产物后自动注入 `PORT` 环境变量再启动，项目代码只要监听 `process.env.PORT` 即可（本地开发可回退默认端口）。
+- **手动部署路径**：若不用 `--deploy`，把应用监听端口改为分配的端口（发放配置里的 `deployUrl` 所示）、自行启动成功后再 `--stage deployment` 上报，服务端会探活校验。
 - 部署地址规则：`http://<大屏服务器IP>:<分配端口>`，上线后现场评委通过大屏直接打开。

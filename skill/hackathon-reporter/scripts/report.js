@@ -80,8 +80,14 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cfg = loadConfig(args.config);
 
-  if (args.verify) return cmdVerify(args, cfg);
-  if (args.deploy) return cmdDeploy(args, cfg);
+  if (args.verify) {
+    if (args.stage) console.warn('⚠ 已同时指定 --stage，验收模式下将被忽略（验收由 --verify 自动上报）');
+    return cmdVerify(args, cfg);
+  }
+  if (args.deploy) {
+    if (args.stage) console.warn('⚠ 已同时指定 --stage，部署模式下将被忽略（上线部署由 --deploy 自动上报）');
+    return cmdDeploy(args, cfg);
+  }
 
   if (args.status) {
     try {
@@ -180,16 +186,21 @@ async function cmdDeploy(args, cfg) {
   console.log('== 黑客松自动部署 ==');
   console.log(`类型: ${type}${type === 'node' ? ` | 启动: ${startCmd}${install ? ' | 先安装依赖' : ''}` : ''}`);
 
-  // 1. 打包（tgz；排除 node_modules 与 .git；tar 输出到 stdout，避免 Windows 盘符路径被 GNU tar 当作远程主机）
+  // 1. 打包（tgz；排除 node_modules、.git 与含 accessKey 的本地配置，避免经静态托管泄露；
+  //    tar 输出到 stdout，避免 Windows 盘符路径被 GNU tar 当作远程主机）
   console.log(`→ 打包 ${absDir} …`);
   let body;
   try {
     const chunks = [];
     await new Promise((resolve, reject) => {
-      const t = spawn('tar', ['-czf', '-', '--exclude', 'node_modules', '--exclude', '.git', '.'], {
-        cwd: absDir,
-        stdio: ['ignore', 'pipe', 'inherit'],
-      });
+      const t = spawn(
+        'tar',
+        ['-czf', '-', '--exclude', 'node_modules', '--exclude', '.git', '--exclude', 'hackathon.config.json', '.'],
+        {
+          cwd: absDir,
+          stdio: ['ignore', 'pipe', 'inherit'],
+        }
+      );
       t.stdout.on('data', (c) => chunks.push(c));
       t.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`tar 退出码 ${code}`))));
       t.on('error', reject);
@@ -219,6 +230,7 @@ async function cmdDeploy(args, cfg) {
       console.log(`✓ 部署成功: ${data.deployUrl}`);
       if (data.stageReported) {
         console.log('  已自动上报「上线部署」，大屏链接已开放访问。');
+        console.log('  进度: 6/7（86%）  下一节点: 7. 线上验收 (acceptance)');
         console.log('  下一步: 验收时执行 node report.js --verify');
       } else if (data.note) {
         console.log(`  ${data.note}`);
@@ -285,7 +297,11 @@ async function cmdVerify(args, cfg) {
   }
 
   let url = args.url || verifyCfg.url || cfg.deployUrl;
-  if (!url) url = `http://localhost:${status.port}`;
+  if (!url) {
+    url = `http://localhost:${status.port}`;
+    console.log('ℹ 未配置部署地址（--url / hackathon.config.json 的 deployUrl），按应用在本机运行处理。');
+    console.log('  若应用部署在赛事服务器上，请用 --url 或配置 deployUrl 指向公网地址。');
+  }
   url = url.replace(/\/+$/, '');
   console.log(`目标: ${url}\n`);
 
