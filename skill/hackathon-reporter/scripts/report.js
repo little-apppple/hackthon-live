@@ -76,6 +76,23 @@ async function callApi(cfg, urlPath, options) {
   return { status: res.status, body };
 }
 
+// 网络波动自动重试（超时/连接失败），仅用于小请求；部署上传不适用
+async function callApiWithRetry(cfg, urlPath, options, attempts = 3) {
+  let lastErr;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await callApi(cfg, urlPath, options);
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts) {
+        console.log(`⚠ 网络波动，${i * 2} 秒后自动重试（第 ${i}/${attempts - 1} 次）…`);
+        await new Promise((r) => setTimeout(r, i * 2000));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cfg = loadConfig(args.config);
@@ -91,7 +108,7 @@ async function main() {
 
   if (args.status) {
     try {
-      const { status, body } = await callApi(
+      const { status, body } = await callApiWithRetry(
         cfg,
         `/api/report/status?accessKey=${encodeURIComponent(cfg.accessKey)}`
       );
@@ -121,14 +138,14 @@ async function main() {
   const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload };
 
   try {
-    let { status, body } = await callApi(cfg, '/api/report', options);
+    let { status, body } = await callApiWithRetry(cfg, '/api/report', options);
 
     // 限频自动等待重试一次
     if (status === 429 && body?.retryAfterSeconds) {
       const wait = Math.min(body.retryAfterSeconds, 15);
       console.log(`⏳ 上报过于频繁，${wait} 秒后自动重试…`);
       await new Promise((r) => setTimeout(r, wait * 1000));
-      ({ status, body } = await callApi(cfg, '/api/report', options));
+      ({ status, body } = await callApiWithRetry(cfg, '/api/report', options));
     }
 
     if (status === 200 && body?.ok) {
@@ -277,7 +294,7 @@ async function cmdVerify(args, cfg) {
   // 1. 定位部署地址与当前进度
   let status;
   try {
-    const r = await callApi(cfg, `/api/report/status?accessKey=${encodeURIComponent(cfg.accessKey)}`);
+    const r = await callApiWithRetry(cfg, `/api/report/status?accessKey=${encodeURIComponent(cfg.accessKey)}`);
     status = r.body;
     if (r.status !== 200 || !status?.ok) return printApiError(r.status, r.body);
   } catch {
@@ -350,20 +367,13 @@ async function cmdVerify(args, cfg) {
     evidence: { verify: results, deployUrl: url },
   });
   try {
-    let { status: httpStatus, body } = await callApi(cfg, '/api/report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload,
-    });
+    const acceptOpts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload };
+    let { status: httpStatus, body } = await callApiWithRetry(cfg, '/api/report', acceptOpts);
     if (httpStatus === 429 && body?.retryAfterSeconds) {
       const wait = Math.min(body.retryAfterSeconds, 15);
       console.log(`⏳ 上报过于频繁，${wait} 秒后自动重试…`);
       await new Promise((r) => setTimeout(r, wait * 1000));
-      ({ status: httpStatus, body } = await callApi(cfg, '/api/report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload,
-      }));
+      ({ status: httpStatus, body } = await callApiWithRetry(cfg, '/api/report', acceptOpts));
     }
     if (httpStatus === 200 && body?.ok) {
       console.log(`\n🎉 ${body.message}`);
