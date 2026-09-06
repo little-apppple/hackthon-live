@@ -289,11 +289,18 @@ async function cmdInit(args) {
     process.exit(2);
   }
 
-  const cfg = { serverUrl, accessKey };
+  const cfg = {
+    serverUrl,
+    accessKey,
+    deploy: { type: 'node', start: 'npm start', install: true, dir: '.' },
+    verify: { api: 'npm run test:api', e2e: 'npm run test:e2e' },
+  };
   if (deployUrl) cfg.deployUrl = String(deployUrl).trim();
   fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + '\n');
   console.log(`\n✓ 已生成 ${target}`);
-  console.log('  接下来进入工作循环：--next 查看工作项 → 干活 → 按给出的命令上报 → 再 --next\n');
+  console.log('  接下来进入工作循环：--next 查看工作项 → 干活 → 按给出的命令上报 → 再 --next');
+  console.log('  注意：testing 节点前请把 verify.api / verify.e2e 指向你的真实测试命令（验收要跑它们）；');
+  console.log('  纯前端静态站把 deploy 改为 { "type": "static", "dir": "dist" }。');
   return cmdNext(args, cfg);
 }
 
