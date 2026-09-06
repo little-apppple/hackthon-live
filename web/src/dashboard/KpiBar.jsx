@@ -1,5 +1,33 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as echarts from 'echarts';
+
+// 数值变化时跳动一下（现场远距离也能感知到"数字变了"）
+function useBump(value) {
+  const prev = useRef(value);
+  const [bump, setBump] = useState(false);
+  useEffect(() => {
+    if (prev.current !== value) {
+      prev.current = value;
+      setBump(true);
+      const t = setTimeout(() => setBump(false), 600);
+      return () => clearTimeout(t);
+    }
+  }, [value]);
+  return bump;
+}
+
+function Stat({ label, value, tone, sub }) {
+  const bump = useBump(value);
+  return (
+    <div className={`kpi-card tone-${tone}`}>
+      <div className={`kpi-value ${bump ? 'bump' : ''}`}>{value}</div>
+      <div className="kpi-label">
+        {label}
+        {sub && <span className="kpi-sub">{sub}</span>}
+      </div>
+    </div>
+  );
+}
 
 export default function KpiBar({ kpi }) {
   const ringRef = useRef(null);
@@ -57,17 +85,5 @@ export default function KpiBar({ kpi }) {
         <div className="kpi-ring-label">整体完成率</div>
       </div>
     </section>
-  );
-}
-
-function Stat({ label, value, tone, sub }) {
-  return (
-    <div className={`kpi-card tone-${tone}`}>
-      <div className="kpi-value">{value}</div>
-      <div className="kpi-label">
-        {label}
-        {sub && <span className="kpi-sub">{sub}</span>}
-      </div>
-    </div>
   );
 }
