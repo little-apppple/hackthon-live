@@ -90,6 +90,11 @@ function logTail(projectId, bytes = 4096) {
 
 // ---------- 启动器 ----------
 
+function childEnv(project) {
+  const extraPath = config.deployPathPrepend ? config.deployPathPrepend + ':' : '';
+  return { ...process.env, PORT: String(project.port), HOST: '0.0.0.0', PATH: extraPath + process.env.PATH };
+}
+
 function startNodeApp(project, meta, state) {
   const dir = path.join(appRoot(project.id), 'app', meta.dir || '');
   if (!fs.existsSync(dir)) {
@@ -101,7 +106,7 @@ function startNodeApp(project, meta, state) {
   const child = spawn(meta.start, {
     shell: true,
     cwd: dir,
-    env: { ...process.env, PORT: String(project.port), HOST: '0.0.0.0' },
+    env: childEnv(project),
     detached: process.platform !== 'win32', // POSIX 下负 PID 杀进程树
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -308,6 +313,7 @@ async function deployProject(project, opts, archiveBuffer) {
         cwd: appDir,
         timeout: 300000,
         encoding: 'utf-8',
+        env: childEnv(project),
       });
       appendLog(project.id, out);
     } catch (e) {

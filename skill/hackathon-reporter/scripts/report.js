@@ -13,13 +13,61 @@ const os = require('os');
 const { spawn, execSync } = require('child_process');
 
 const USAGE = `用法:
+  node report.js --next [--config <路径>]
   node report.js --stage <节点标识|序号> [--message "说明"] [--config <路径>]
   node report.js --status [--config <路径>]
   node report.js --deploy [--dir <目录>] [--type node|static] [--start <命令>] [--no-install] [--config <路径>]
   node report.js --verify [--url <部署地址>] [--dry] [--config <路径>]
 节点: requirements(1) design(2) prototype(3) coding(4) testing(5) deployment(6) acceptance(7)
+--next: 查看下一节点工作项（工作循环入口：--next → 干活 → 上报 → 再 --next）
 --deploy: 打包并上传到服务端自动部署到预留端口，探活通过后自动上报「上线部署」
 --verify: 探活 + 接口测试 + E2E 全部通过后自动上报「线上验收」（退出码 3 = 验证未通过）`;
+
+// 每个节点的工作项指引（与服务端节点定义对齐）
+const STAGE_GUIDE = {
+  requirements: {
+    name: '需求分析',
+    done: '需求清单/文档产出，圈定可演示的核心场景',
+    tips: ['列出功能清单并排优先级，明确演示主线', '砍掉演示主线之外的一切（时间有限）'],
+    cmd: 'node report.js --stage requirements --message "一句话成果"',
+  },
+  design: {
+    name: '方案设计',
+    done: '技术选型、架构、核心接口契约定稿',
+    tips: ['先定核心接口契约——coding 和验收测试都依赖它', '选团队最熟的技术栈，不引入新框架'],
+    cmd: 'node report.js --stage design --message "一句话成果"',
+  },
+  prototype: {
+    name: '原型设计',
+    done: '页面/交互原型完成并确认',
+    tips: ['确定验收 E2E 要覆盖的核心流程路径', '原型确认后再动手写代码，避免返工'],
+    cmd: 'node report.js --stage prototype --message "一句话成果"',
+  },
+  coding: {
+    name: '代码开发',
+    done: '核心功能全部完成、可运行',
+    tips: ['服务必须监听 process.env.PORT（自动部署靠它注入端口）', '本地开发可回退默认端口'],
+    cmd: 'node report.js --stage coding --message "一句话成果"',
+  },
+  testing: {
+    name: '本地测试',
+    done: '核心流程自测通过、无明显 bug',
+    tips: ['直接编写 hackathon.config.json 里 verify.api / verify.e2e 指向的测试脚本——这就是验收要用的', '测试覆盖演示主线即可'],
+    cmd: 'node report.js --stage testing --message "一句话成果"',
+  },
+  deployment: {
+    name: '上线部署',
+    done: '应用已在预留端口上运行并可访问',
+    tips: ['推荐 --deploy：服务端自动注入端口、起服、探活、上报', '手动路径：自行监听预留端口启动成功后 --stage deployment'],
+    cmd: 'node report.js --deploy',
+  },
+  acceptance: {
+    name: '线上验收',
+    done: '探活 + 接口测试 + E2E 全部通过（自动化验证，不靠自我申报）',
+    tips: ['确保 hackathon.config.json 的 verify.api / verify.e2e 已配置并可跑通', '可用 --dry 先验证不上报'],
+    cmd: 'node report.js --verify',
+  },
+};
 
 function parseArgs(argv) {
   const args = { config: 'hackathon.config.json' };
@@ -28,6 +76,7 @@ function parseArgs(argv) {
     if (a === '--stage') args.stage = argv[++i];
     else if (a === '--message') args.message = argv[++i];
     else if (a === '--status') args.status = true;
+    else if (a === '--next') args.next = true;
     else if (a === '--verify') args.verify = true;
     else if (a === '--deploy') args.deploy = true;
     else if (a === '--url') args.url = argv[++i];
@@ -106,6 +155,8 @@ async function main() {
     return cmdDeploy(args, cfg);
   }
 
+  if (args.next) return cmdNext(args, cfg);
+
   if (args.status) {
     try {
       const { status, body } = await callApiWithRetry(
@@ -162,6 +213,41 @@ async function main() {
   } catch {
     networkError();
   }
+}
+
+// ---------- 工作循环：--next 返回下一节点工作项 ----------
+
+async function cmdNext(args, cfg) {
+  let status;
+  try {
+    const r = await callApiWithRetry(cfg, `/api/report/status?accessKey=${encodeURIComponent(cfg.accessKey)}`);
+    status = r.body;
+    if (r.status !== 200 || !status?.ok) return printApiError(r.status, r.body);
+  } catch {
+    return networkError();
+  }
+  if (status.revoked) {
+    console.error('✗ 该 accessKey 已被吊销，无法继续。请联系赛事管理员。');
+    process.exit(1);
+  }
+
+  console.log(`== 黑客松工作项 ==`);
+  console.log(`项目: ${status.projectName}`);
+  console.log(`进度: ${status.completedStages}/7（${status.progress}%）`);
+
+  if (!status.nextStage) {
+    console.log('\n🎉 全部节点已完成，比赛流程结束。评委可通过大屏访问项目。');
+    process.exit(0);
+  }
+
+  const guide = STAGE_GUIDE[status.nextStage.id];
+  console.log(`\n▶ 下一节点 ${status.nextStage.index}. ${guide.name} (${status.nextStage.id})`);
+  console.log(`  完成标准: ${guide.done}`);
+  console.log('  建议动作:');
+  guide.tips.forEach((t) => console.log(`    - ${t}`));
+  console.log('  完成后执行:');
+  console.log(`    ${guide.cmd}`);
+  process.exit(0);
 }
 
 // ---------- 自动部署：打包 → 上传 → 服务端起服 → 自动上报「上线部署」 ----------

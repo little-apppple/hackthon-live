@@ -24,6 +24,8 @@ const config = {
   deployRoot: process.env.DEPLOY_ROOT || path.join(__dirname, '..', 'data', 'deploys'),
   deployMaxMb: intEnv('DEPLOY_MAX_MB', 200),
   deployStartTimeoutMs: intEnv('DEPLOY_START_TIMEOUT_MS', 60000),
+  // 部署子进程的 PATH 前缀（如 /opt/node22/bin，保证项目用指定版本的 node/npm）
+  deployPathPrepend: process.env.DEPLOY_PATH_PREPEND || '',
 };
 
 if (config.portPoolEnd - config.portPoolStart < 0) {
