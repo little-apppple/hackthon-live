@@ -154,6 +154,9 @@ async function api(method, path, body, useAuth = true) {
     const done = await api('POST', '/api/report', { accessKey: key1, stage: 'acceptance' }, false);
     check('线上验收完成 100%', done.data.ok && done.data.progress === 100);
     check('deployLinkReady 标记', done.data.deployLinkReady === true);
+    const snapDone = await api('GET', '/api/snapshot', undefined, false);
+    check('验收完成后仍计入已部署 KPI', snapDone.data.snapshot.kpi.deployed >= 1, JSON.stringify(snapDone.data.snapshot.kpi));
+    check('验收完成 KPI 计数', snapDone.data.snapshot.kpi.done >= 1);
   }
 
   console.log(`\n== 8. 审计 ==`);
