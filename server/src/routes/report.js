@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const express = require('express');
 const db = require('../db');
 const config = require('../config');
-const { stageByRef, stageByIndex, deriveStatus, progressPercent, DEPLOY_STAGE_INDEX } = require('../stages');
+const { stageByRef, stageByIndex, deriveStatus, progressPercent, DEPLOY_STAGE_INDEX, LOOP_MIN_STAGE_INDEX, VALID_STAGE_IDS, STAGES } = require('../stages');
 const { notifyRefresh } = require('../sse');
 const { allocatePort, probeLocalPort } = require('../ports');
 const { getActiveEvent } = require('../events');
@@ -62,8 +62,8 @@ router.post('/report', aw(async (req, res) => {
     return res.status(400).json({
       ok: false,
       code: 'INVALID_STAGE',
-      error: 'stage 无效，应为 1-7 的序号或节点标识',
-      validStages: ['requirements', 'design', 'prototype', 'coding', 'testing', 'deployment', 'acceptance'],
+      error: `stage 无效，应为 1-${STAGES.length} 的序号或节点标识`,
+      validStages: VALID_STAGE_IDS,
     });
   }
 
@@ -75,7 +75,7 @@ router.post('/report', aw(async (req, res) => {
       code: 'STAGE_ALREADY_DONE',
       error: `节点「${st.name}」已完成，不能重复上报`,
       completedStages: project.completed_stages,
-      nextStage: expected <= 7 ? stageByIndex(expected) : null,
+      nextStage: expected <= STAGES.length ? stageByIndex(expected) : null,
     });
   }
   if (st.index > expected) {
@@ -128,15 +128,15 @@ router.post('/report', aw(async (req, res) => {
   audit(project.id, st.id, 1, null, msg, ip, evidenceJson);
 
   const progress = progressPercent(st.index);
-  const next = st.index < 7 ? stageByIndex(st.index + 1) : null;
+  const next = st.index < STAGES.length ? stageByIndex(st.index + 1) : null;
 
   let finalMessage;
   if (st.index === DEPLOY_STAGE_INDEX && !deployProbe.ok) {
     finalMessage = '已记录上线部署（⚠ 服务端探测端口未响应，请确认应用已启动并监听预留端口）';
   } else if (st.index === DEPLOY_STAGE_INDEX) {
     finalMessage = '已上线部署（服务端探活通过），大屏链接已开放访问';
-  } else if (st.index === 7) {
-    finalMessage = '全部节点完成，比赛进度 100%！';
+  } else if (st.index === STAGES.length) {
+    finalMessage = '最终提交完成，作品已定格为参赛评分版本！';
   } else {
     finalMessage = `「${st.name}」已记录，当前进度 ${progress}%`;
   }
@@ -161,6 +161,7 @@ router.post('/report', aw(async (req, res) => {
 // 打包技能包时烘入 server.json），防止用公开大屏上的部门/小组/项目名推导任意 accessKey；
 // 每 IP 限频；成功注册写入审计。
 const registerAttempts = new Map(); // ip -> epoch ms 数组
+const loopLastAt = new Map(); // projectId -> epoch ms（loop 每项目 10s 窗口）
 setInterval(() => {
   const cutoff = Date.now() - 60 * 1000;
   for (const [ip, arr] of registerAttempts) {
@@ -289,6 +290,61 @@ router.post('/register', aw(async (req, res) => {
   });
 }));
 
+// 开新一轮迭代（loop）：上线部署完成后，可调整需求重新走全流程
+// 幂等安全：进度重置只在成功响应时发生；loop_count 单调递增，历史上报记录全部保留在审计中
+router.post('/loop', aw(async (req, res) => {
+  const { accessKey } = req.body || {};
+  const ip = req.ip || '';
+  if (!accessKey || typeof accessKey !== 'string') {
+    return res.status(400).json({ ok: false, code: 'INVALID_KEY', error: '缺少 accessKey' });
+  }
+  const project = db.prepare('SELECT * FROM projects WHERE access_key = ?').get(accessKey.trim());
+  if (!project || project.archived) {
+    return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: 'accessKey 无效' });
+  }
+  // 每项目 10 秒窗口限频：防 agent 死循环误调把轮次刷爆（复用 /report 的窗口语义）
+  const now = Date.now();
+  const lastLoopAt = loopLastAt.get(project.id) || 0;
+  if (now - lastLoopAt < 10000) {
+    const retryAfter = Math.ceil((10000 - (now - lastLoopAt)) / 1000);
+    return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: `操作过于频繁，请 ${retryAfter} 秒后重试`, retryAfterSeconds: retryAfter });
+  }
+  loopLastAt.set(project.id, now);
+  if (project.revoked) {
+    audit(project.id, 'loop', 0, 'KEY_REVOKED', '', ip);
+    return res.status(403).json({ ok: false, code: 'KEY_REVOKED', error: '该 accessKey 已被管理员吊销，请联系管理员' });
+  }
+  if (project.completed_stages < LOOP_MIN_STAGE_INDEX) {
+    audit(project.id, 'loop', 0, 'LOOP_NOT_ALLOWED', '', ip);
+    return res.status(409).json({
+      ok: false,
+      code: 'LOOP_NOT_ALLOWED',
+      error: `至少完成「上线部署」（${LOOP_MIN_STAGE_INDEX}/${STAGES.length}）才能开启新一轮迭代`,
+      completedStages: project.completed_stages,
+      nextStage: stageByIndex(project.completed_stages + 1),
+    });
+  }
+  const newLoop = project.loop_count + 1;
+  db.prepare(
+    `UPDATE projects
+        SET loop_count = ?, completed_stages = 0, status = 'active',
+            updated_at = datetime('now','localtime')
+      WHERE id = ?`
+  ).run(newLoop, project.id);
+  audit(project.id, 'loop', 1, null, `开启第 ${newLoop} 轮迭代（上一轮完成 ${project.completed_stages}/${STAGES.length}）`, ip);
+  notifyRefresh('loop');
+
+  res.json({
+    ok: true,
+    code: 'LOOP_STARTED',
+    loopCount: newLoop,
+    completedStages: 0,
+    progress: 0,
+    nextStage: stageByIndex(1),
+    message: `已进入第 ${newLoop} 轮迭代：调整需求后重新走流程，历史记录保留在审计中`,
+  });
+}));
+
 // Agent 查询当前进度与下一节点（409 自愈 / --verify 定位部署地址用）
 router.get('/report/status', (req, res) => {
   const accessKey = req.query.accessKey;
@@ -297,7 +353,7 @@ router.get('/report/status', (req, res) => {
   if (!project || project.archived) {
     return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: 'accessKey 无效' });
   }
-  const next = project.completed_stages < 7 ? stageByIndex(project.completed_stages + 1) : null;
+  const next = project.completed_stages < STAGES.length ? stageByIndex(project.completed_stages + 1) : null;
   res.json({
     ok: true,
     revoked: !!project.revoked,

@@ -148,6 +148,13 @@ try {
   /* 列已存在 */
 }
 
+// 迁移：迭代轮次（--loop 开新一轮时 +1，进度重置）
+try {
+  db.exec('ALTER TABLE projects ADD COLUMN loop_count INTEGER NOT NULL DEFAULT 1');
+} catch {
+  /* 列已存在 */
+}
+
 // 迁移：无活动概念的旧库 → 全部数据归入默认活动（id=1）
 if (columnsOf('departments').length > 0 && !columnsOf('departments').includes('event_id')) {
   db.pragma('foreign_keys = OFF');

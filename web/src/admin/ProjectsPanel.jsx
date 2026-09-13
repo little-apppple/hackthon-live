@@ -323,7 +323,7 @@ const DEPLOY_STATUS_CLASS = {
 const deployVerb = { restart: '重启', stop: '停止', start: '启动' };
 
 function statusText(s) {
-  return { loading: '等待启动', active: '进行中', deployed: '已上线', done: '已完成' }[s] || s;
+  return { loading: '等待启动', active: '进行中', deployed: '已上线', done: '已完成', submitted: '已提交' }[s] || s;
 }
 
 function CreatedModal({ info, onClose }) {

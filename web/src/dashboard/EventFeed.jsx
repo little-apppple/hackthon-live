@@ -43,7 +43,9 @@ const STAGE_NAMES = {
   testing: '本地测试',
   deployment: '上线部署',
   acceptance: '线上验收',
+  submission: '最终提交',
   register: '自助注册',
+  loop: '迭代重启',
 };
 
 function stageName(id) {

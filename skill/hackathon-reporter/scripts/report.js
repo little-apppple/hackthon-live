@@ -12,6 +12,9 @@ const path = require('path');
 const os = require('os');
 const { spawn, execSync } = require('child_process');
 
+// 与服务端 STAGES.length 对齐的节点总数（八节点模型）
+const TOTAL_STAGES = 8;
+
 const USAGE = `用法:
   node report.js --init [--server-url <地址> --access-key <密钥>] [--deploy-url <地址>] [--force]     # 手工模式
   node report.js --init [--department <部门> --group <小组> --project <项目名>] [--description <简介>]  # 自助注册模式（技能包内置上报地址时自动启用）
@@ -20,7 +23,7 @@ const USAGE = `用法:
   node report.js --status [--config <路径>]
   node report.js --deploy [--dir <目录>] [--type node|static] [--start <命令>] [--no-install] [--config <路径>]
   node report.js --verify [--url <部署地址>] [--dry] [--config <路径>]
-节点: requirements(1) design(2) prototype(3) coding(4) testing(5) deployment(6) acceptance(7)
+节点: requirements(1) design(2) prototype(3) coding(4) testing(5) deployment(6) acceptance(7) submission(8)
 --init 两种模式（都幂等，可安全重跑）:
   自助注册: 技能包内置上报地址（server.json）且未提供 --access-key 时启用——引导填写部门/小组/项目名，
             发送到服务端注册（录入名单、预留部署端口）并返回 accessKey；相同「部门/小组/项目名」
@@ -28,7 +31,9 @@ const USAGE = `用法:
   手工模式: 提供 --access-key（管理员发放）时启用；缺 server-url 时进入交互问答
 --next: 查看下一节点工作项（工作循环入口：--next → 干活 → 上报 → 再 --next）
 --deploy: 打包并上传到服务端自动部署到预留端口，探活通过后自动上报「上线部署」
---verify: 探活 + 接口测试 + E2E 全部通过后自动上报「线上验收」（退出码 3 = 验证未通过）`;
+--verify: 探活 + 接口测试 + E2E 全部通过后自动上报「线上验收」（退出码 3 = 验证未通过）
+--loop: 开新一轮迭代（上线后调整需求重走流程，进度重置、loop_count+1、历史留审计）
+--submit: 用户本人确认后上报「最终提交」，当前线上版本定格为参赛评分作品`;
 
 const ONBOARDING = `── 首次使用接入引导（两种模式任选其一）──────────────
 模式 A · 自助注册（推荐，技能包内置上报地址时自动生效）：
@@ -44,27 +49,37 @@ const ONBOARDING = `── 首次使用接入引导（两种模式任选其一�
 
 配置完成后执行 node report.js --next 即可开始比赛流程：
   --next 查看下一节点工作项 → 干活 → 按给出的命令上报 → 再 --next
-  七个节点：需求分析→方案设计→原型设计→代码开发→本地测试→上线部署→线上验收
+  八个节点：需求分析→方案设计→原型设计→代码开发→本地测试→上线部署→线上验收→最终提交
+  上线后可 --loop 开新一轮迭代（调整需求重走流程）；--submit 由用户本人确认最终参赛作品
 ──────────────────────────────────────────────`;
 
 // 每个节点的工作项指引（与服务端节点定义对齐）
+// 参与感原则：需求由用户主导（Agent 只做搜索辅助与追问），原型可由用户选模板，最终提交必须用户本人确认
 const STAGE_GUIDE = {
   requirements: {
     name: '需求分析',
-    done: '需求清单/文档产出，圈定可演示的核心场景',
-    tips: ['列出功能清单并排优先级，明确演示主线', '砍掉演示主线之外的一切（时间有限）'],
+    done: '用户确认的 PRD 落盘（docs/prd.md），产品逻辑闭环：每个输入/输出都有来源、每条流程都能跑通',
+    tips: [
+      '先请用户亲笔写需求——不要替用户编需求',
+      '按项目名深度搜索相关产品/同类实现，产出需求模板给用户参考填写',
+      '用 grill-me 方式一次一问补盲点；不确定能否获取的数据/接口先验证再写进 PRD，禁止假设',
+      'PRD 必须形成闭环：用户从哪来 → 做什么 → 数据从哪来 → 结果到哪去，断链即打回',
+    ],
     cmd: 'node report.js --stage requirements --message "一句话成果"',
   },
   design: {
     name: '方案设计',
-    done: '技术选型、架构、核心接口契约定稿',
-    tips: ['先定核心接口契约——coding 和验收测试都依赖它', '选团队最熟的技术栈，不引入新框架'],
+    done: '架构与核心接口契约定稿（技术选型固定：Node.js 全栈 + node:sqlite，无需另行讨论）',
+    tips: ['技术栈默认 Node.js 全栈 + node:sqlite，除非用户明确要求更换', '先定核心接口契约——coding 和验收测试都依赖它'],
     cmd: 'node report.js --stage design --message "一句话成果"',
   },
   prototype: {
     name: '原型设计',
-    done: '页面/交互原型完成并确认',
-    tips: ['确定验收 E2E 要覆盖的核心流程路径', '原型确认后再动手写代码，避免返工'],
+    done: '页面/交互原型获得用户确认',
+    tips: [
+      '可选：用户从设计模板站（如 https://designmd.app）选一个模板把链接发来，按模板风格实现原型',
+      '用户没给模板则自行产出低注意力成本的原型，交用户确认后再进入开发',
+    ],
     cmd: 'node report.js --stage prototype --message "一句话成果"',
   },
   coding: {
@@ -91,6 +106,12 @@ const STAGE_GUIDE = {
     tips: ['确保 hackathon.config.json 的 verify.api / verify.e2e 已配置并可跑通', '可用 --dry 先验证不上报'],
     cmd: 'node report.js --verify',
   },
+  submission: {
+    name: '最终提交',
+    done: '用户本人确认后，当前线上版本定格为最终参赛待评分作品',
+    tips: ['必须让用户亲手执行 --submit 并在终端确认，Agent 不得代为确认', '提交前向用户展示线上地址与功能清单，确认这就是要评分的版本'],
+    cmd: 'node report.js --submit',
+  },
 };
 
 function parseArgs(argv) {
@@ -110,6 +131,9 @@ function parseArgs(argv) {
     else if (a === '--project') args.project = argv[++i];
     else if (a === '--description') args.description = argv[++i];
     else if (a === '--register-token') args.registerToken = argv[++i];
+    else if (a === '--loop') args.loop = true;
+    else if (a === '--submit') args.submit = true;
+    else if (a === '--yes') args.yes = true;
     else if (a === '--force') args.force = true;
     else if (a === '--verify') args.verify = true;
     else if (a === '--deploy') args.deploy = true;
@@ -194,6 +218,8 @@ async function main() {
   }
 
   if (args.next) return cmdNext(args, cfg);
+  if (args.loop) return cmdLoop(args, cfg);
+  if (args.submit) return cmdSubmit(args, cfg);
 
   if (args.status) {
     try {
@@ -206,9 +232,9 @@ async function main() {
           console.error('✗ 该 accessKey 已被吊销，请联系赛事管理员。');
           process.exit(1);
         }
-        console.log(`项目: ${body.projectName}`);
-        console.log(`进度: ${body.completedStages}/7（${body.progress}%）`);
-        console.log(body.nextStage ? `下一节点: ${body.nextStage.index}. ${body.nextStage.name} (${body.nextStage.id})` : '全部节点已完成 🎉');
+        console.log(`项目: ${body.projectName}（LOOP ×${body.loopCount || 1}）`);
+        console.log(`进度: ${body.completedStages}/8（${body.progress}%）`);
+        console.log(body.nextStage ? `下一节点: ${body.nextStage.index}. ${body.nextStage.name} (${body.nextStage.id})` : '最终提交已完成，作品已定格为参赛评分版本');
         process.exit(0);
       }
       printApiError(status, body);
@@ -238,9 +264,9 @@ async function main() {
     }
 
     if (status === 200 && body?.ok) {
-      const bar = '█'.repeat(body.completedStages) + '░'.repeat(7 - body.completedStages);
+      const bar = '█'.repeat(body.completedStages) + '░'.repeat(Math.max(0, TOTAL_STAGES - body.completedStages));
       console.log(`✓ ${body.message}`);
-      console.log(`  [${bar}] ${body.completedStages}/7（${body.progress}%）`);
+      console.log(`  [${bar}] ${body.completedStages}/${TOTAL_STAGES}（${body.progress}%）`);
       if (body.deployProbe === 'unreachable') {
         console.log('  ⚠ 服务端未探测到端口响应，请确认应用已监听预留端口');
       }
@@ -418,6 +444,111 @@ async function cmdInit(args) {
   return cmdNext(args, cfg);
 }
 
+// ---------- 迭代与最终提交 ----------
+
+async function confirm(question) {
+  const readline = require('readline/promises');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const a = (await rl.question(question)).trim().toLowerCase();
+    return a === 'y' || a === 'yes';
+  } finally {
+    rl.close();
+  }
+}
+
+// --loop：开启新一轮迭代（上线后可调整需求重走全流程；进度重置、loop_count+1、历史留审计）
+async function cmdLoop(args, cfg) {
+  if (!args.yes && !(await confirm('确定开启新一轮迭代？进度将重置并重走全流程，历史记录保留在审计中 [y/N]: '))) {
+    console.log('已取消。');
+    return;
+  }
+  try {
+    let { status, body } = await callApiWithRetry(cfg, '/api/loop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessKey: cfg.accessKey }),
+    });
+    if (status === 429 && body?.retryAfterSeconds) {
+      const wait = Math.min(body.retryAfterSeconds, 15);
+      console.log(`⏳ 操作过于频繁，${wait} 秒后自动重试…`);
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      ({ status, body } = await callApiWithRetry(cfg, '/api/loop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessKey: cfg.accessKey }),
+      }));
+    }
+    if (status === 200 && body?.ok) {
+      console.log(`✓ ${body.message}`);
+      console.log(`  当前轮次: LOOP ×${body.loopCount}`);
+      return cmdNext(args, cfg);
+    }
+    printApiError(status, body);
+  } catch {
+    networkError();
+  }
+}
+
+// --submit：最终提交。必须由参赛用户本人交互确认——Agent 不得代为确认（服务端节点也要求顺序到位）
+async function cmdSubmit(args, cfg) {
+  let st;
+  try {
+    const r = await callApiWithRetry(cfg, `/api/report/status?accessKey=${encodeURIComponent(cfg.accessKey)}`);
+    if (r.status !== 200 || !r.body?.ok) return printApiError(r.status, r.body);
+    st = r.body;
+  } catch {
+    return networkError();
+  }
+  if (st.revoked) {
+    console.error('✗ 该 accessKey 已被吊销，请联系赛事管理员。');
+    process.exit(1);
+  }
+  if (st.completedStages < TOTAL_STAGES - 1 || !st.nextStage || st.nextStage.id !== 'submission') {
+    console.error('✗ 还不能最终提交：请先完成「线上验收」（7/8）。');
+    console.error(`  当前进度: ${st.completedStages}/${TOTAL_STAGES}，下一节点: ${st.nextStage ? `${st.nextStage.index}. ${st.nextStage.name}` : '无'}`);
+    process.exit(1);
+  }
+  console.log('== 最终提交确认 ==');
+  console.log(`项目: ${st.projectName}`);
+  console.log(`部署地址: ${cfg.deployUrl || `http://localhost:${st.port}`}`);
+  console.log('确认后，当前线上版本将定格为最终参赛待评分作品（如后续还要修改，可 --loop 开新一轮）。');
+  if (!args.yes && !(await confirm('确认提交为最终参赛作品？[y/N]: '))) {
+    console.log('已取消，未提交。');
+    return;
+  }
+  const payload = JSON.stringify({
+    accessKey: cfg.accessKey,
+    stage: 'submission',
+    message: args.message || '用户确认最终提交',
+    evidence: { confirmedVia: 'cli-interactive' },
+  });
+  try {
+    let { status, body } = await callApiWithRetry(cfg, '/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+    });
+    if (status === 429 && body?.retryAfterSeconds) {
+      const wait = Math.min(body.retryAfterSeconds, 15);
+      console.log(`⏳ 上报过于频繁，${wait} 秒后自动重试…`);
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      ({ status, body } = await callApiWithRetry(cfg, '/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      }));
+    }
+    if (status === 200 && body?.ok) {
+      console.log('✓ 最终提交完成！当前线上版本即为参赛评分作品。');
+      process.exit(0);
+    }
+    printApiError(status, body);
+  } catch {
+    networkError();
+  }
+}
+
 // ---------- 工作循环：--next 返回下一节点工作项 ----------
 
 async function cmdNext(args, cfg) {
@@ -436,10 +567,15 @@ async function cmdNext(args, cfg) {
 
   console.log(`== 黑客松工作项 ==`);
   console.log(`项目: ${status.projectName}`);
-  console.log(`进度: ${status.completedStages}/7（${status.progress}%）`);
+  console.log(`进度: ${status.completedStages}/8（${status.progress}%）`);
 
   if (!status.nextStage) {
-    console.log('\n🎉 全部节点已完成，比赛流程结束。评委可通过大屏访问项目。');
+    console.log('\n🎉 最终提交已完成，作品已定格为参赛评分版本。评委可通过大屏访问项目。');
+    process.exit(0);
+  }
+  if (status.nextStage.id === 'submission') {
+    console.log('\n★ 七个开发节点已全部完成。最后一个节点「最终提交」必须由参赛用户本人执行：');
+    console.log('  node report.js --submit    （终端交互确认后上报，Agent 请引导用户亲自运行）');
     process.exit(0);
   }
 
@@ -600,8 +736,12 @@ async function cmdVerify(args, cfg) {
     console.error('✗ 该 accessKey 已被吊销，无法验收。');
     process.exit(1);
   }
-  if (status.completedStages >= 7) {
-    console.log('✓ 该项目已全部完成并通过验收，无需重复验收。');
+  if (status.completedStages >= TOTAL_STAGES) {
+    console.log('✓ 最终提交已完成，作品已是参赛评分版本。如需修改请 --loop 开新一轮。');
+    process.exit(0);
+  }
+  if (status.completedStages === TOTAL_STAGES - 1) {
+    console.log('✓ 验收已通过（7/8）。若这是要评分的版本，请让用户本人执行 --submit 完成最终提交。');
     process.exit(0);
   }
   if (status.completedStages < 6) {
@@ -694,11 +834,12 @@ function printApiError(status, body) {
     if (body?.nextStage) {
       console.error(`  该节点已完成，下一节点是 ${body.nextStage.index}. ${body.nextStage.name} (${body.nextStage.id})`);
     } else {
-      console.error('  全部节点已完成，验收早已通过。');
+      console.error('  最终提交已完成，作品已是参赛评分版本。如需修改请 --loop 开新一轮。');
     }
   }
   if (code === 'KEY_REVOKED') console.error('  上报通道已被管理员禁用，请联系赛事管理员。');
   if (code === 'INVALID_KEY') console.error('  请检查 hackathon.config.json 中的 accessKey 是否正确。');
+  if (code === 'LOOP_NOT_ALLOWED') console.error('  至少完成「上线部署」才能开新一轮迭代。');
   process.exit(1);
 }
 

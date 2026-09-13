@@ -5,12 +5,14 @@ const STATUS_TEXT = {
   active: '进行中',
   deployed: '已上线',
   done: '已完成',
+  submitted: '已提交',
 };
 const STATUS_CLASS = {
   loading: 'st-loading',
   active: 'st-active',
   deployed: 'st-deployed',
   done: 'st-done',
+  submitted: 'st-submitted',
 };
 
 export default function ProjectCard({ project, stages }) {
@@ -20,12 +22,14 @@ export default function ProjectCard({ project, stages }) {
   const currentStage =
     project.completed_stages < stageNames.length ? stageNames[project.completed_stages] : null;
   const linkReady = !revoked && project.completed_stages >= 6 && project.link;
+  const loop = project.loop_count || 1;
 
   return (
     <div className={`project-card ${STATUS_CLASS[status] || ''} ${revoked ? 'is-revoked' : ''}`} data-status={status}>
       <div className="pc-top">
         <span className="pc-name" title={project.name}>
           {project.name}
+          {loop > 1 && <span className="pc-loop" title={`第 ${loop} 轮迭代`}>LOOP×{loop}</span>}
         </span>
         <span className={`pc-badge badge-${status}`}>
           {status === 'loading' && <span className="spin-dot" />}
@@ -53,8 +57,10 @@ export default function ProjectCard({ project, stages }) {
             : status === 'loading'
               ? '等待小组首次上报'
               : status === 'done'
-                ? '全部节点完成 · 线上验收通过'
-                : `当前节点：${currentStage ? currentStage.name : '—'}`}
+                ? '线上验收通过 · 待用户最终提交'
+                : status === 'submitted'
+                  ? '最终参赛作品 · 评分版本已定格'
+                  : `当前节点：${currentStage ? currentStage.name : '—'}`}
         </span>
         {linkReady && (
           <a className="pc-link-btn" href={project.link} target="_blank" rel="noreferrer" title={project.link}>

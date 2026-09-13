@@ -36,7 +36,7 @@ function buildSnapshot(eventId) {
 
   const projects = db
     .prepare(
-      `SELECT id, group_id, name, description, port, completed_stages,
+      `SELECT id, group_id, name, description, port, completed_stages, loop_count,
               status, revoked, last_report_at, created_at
          FROM projects
         WHERE event_id = ? AND archived = 0

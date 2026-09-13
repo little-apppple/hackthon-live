@@ -17,19 +17,22 @@
 3. 测试发现问题：先自行修复并重跑；只有需求歧义、破坏性变更或连续 3 轮修复仍未通过时，停下来输出反馈待我确认，不擅自扩大改动范围；
 4. 全部通过后：中文提交信息（一行主题 + 必要时正文说明"为什么"），提交并推送远端；参赛项目随后按下方卡点上报。
 
-## 流程卡点（与 hackathon-reporter 七节点一一对应）
+## 流程卡点（与 hackathon-reporter 八节点一一对应）
 
-用 `node skill/hackathon-reporter/scripts/report.js --next` 驱动工作循环：完成一个节点立即上报，禁止跳节点。**仅参赛项目（存在 `hackathon.config.json`）执行上报命令**；非参赛项目只按卡点表做本地验收检查，不执行任何 report.js 上报/验收命令。
+用 `node skill/hackathon-reporter/scripts/report.js --next` 驱动工作循环：完成一个节点立即上报，禁止跳节点。**仅参赛项目（存在 `hackathon.config.json`）执行上报命令**；非参赛项目只按卡点表做本地验收检查，不执行任何 report.js 上报/验收命令。**用户参与是硬要求：需求用户写、原型用户选、最终提交用户确认。**
 
 | VibeCoding 阶段 | 卡点 | 上报 |
 |---|---|---|
-| 需求澄清 → spec 落盘 | requirements | `--stage requirements` |
-| 计划拆解 → 方案/接口契约定稿 | design | `--stage design` |
-| 原型确认（核心旅程清单定稿） | prototype | `--stage prototype` |
+| 需求共创：用户亲笔填需求模板（Agent 深搜产出）→ grill-me 追问 → PRD 闭环落盘 docs/prd.md | requirements | `--stage requirements` |
+| 方案/接口契约定稿（技术栈固定 Node.js 全栈 + node:sqlite） | design | `--stage design` |
+| 原型确认：可选设计模板链接（如 designmd.app），须用户确认 | prototype | `--stage prototype` |
 | TDD 实现，核心功能可运行 | coding | `--stage coding` |
 | 自检循环（≤3 轮）+ 交叉 review（全新上下文，P0/P1 清零）+ E2E 回归全绿 | testing | `--stage testing` |
 | 构建并部署 | deployment | `--deploy`（推荐）/ `--stage deployment` |
 | 终验门禁（有新鲜运行证据才宣称完成） | acceptance | 只能 `--verify`（手工上报视为违规）；verify.api/e2e 未配置会被跳过，testing 节点就要补齐 |
+| 用户终审：用户本人 `--submit` 交互确认，作品定格为评分版本；Agent 严禁代确认 | submission | `--submit`（仅用户亲手） |
+
+**迭代循环**：上线后用户可 `--loop` 开新一轮（进度重置、大屏显示 LOOP×n、历史留审计），每轮重走全部卡点。
 
 没有新鲜验证证据不宣称完成；交叉 review 用全新上下文（不带实现者会话历史），P0/P1 清零才放行。
 
