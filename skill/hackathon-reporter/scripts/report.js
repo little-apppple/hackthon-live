@@ -21,6 +21,7 @@ const USAGE = `用法:
   node report.js --next [--config <路径>]
   node report.js --stage <节点标识|序号> [--message "说明"] [--config <路径>]
   node report.js --status [--config <路径>]
+  node report.js --doctor [--config <路径>]   # 环境检测与用户引导（--init 成功后自动运行）
   node report.js --deploy [--dir <目录>] [--type node|static] [--start <命令>] [--no-install] [--config <路径>]
   node report.js --verify [--url <部署地址>] [--dry] [--config <路径>]
 节点: requirements(1) design(2) prototype(3) coding(4) testing(5) deployment(6) acceptance(7) submission(8)
@@ -134,6 +135,7 @@ function parseArgs(argv) {
     else if (a === '--loop') args.loop = true;
     else if (a === '--submit') args.submit = true;
     else if (a === '--yes') args.yes = true;
+    else if (a === '--doctor') args.doctor = true;
     else if (a === '--force') args.force = true;
     else if (a === '--verify') args.verify = true;
     else if (a === '--deploy') args.deploy = true;
@@ -206,6 +208,7 @@ async function callApiWithRetry(cfg, urlPath, options, attempts = 3) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.init) return cmdInit(args);
+  if (args.doctor) return cmdDoctor(args); // 无配置也可检测（放 loadConfig 之前）
   const cfg = loadConfig(args.config);
 
   if (args.verify) {
@@ -438,10 +441,141 @@ async function cmdInit(args) {
   if (deployUrl) cfg.deployUrl = String(deployUrl).trim();
   fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + '\n');
   console.log(`\n✓ 已生成 ${target}`);
-  console.log('  接下来进入工作循环：--next 查看工作项 → 干活 → 按给出的命令上报 → 再 --next');
-  console.log('  注意：testing 节点前请把 verify.api / verify.e2e 指向你的真实测试命令（验收要跑它们）；');
   console.log('  纯前端静态站把 deploy 改为 { "type": "static", "dir": "dist" }。');
+  await runDoctor(cfg);
   return cmdNext(args, cfg);
+}
+
+// ---------- 环境检测与用户引导（--doctor；--init 成功后自动运行）----------
+
+function readLocalPkg() {
+  try {
+    return JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+async function runDoctor(cfg, configBroken) {
+  const rows = [];
+  let failCount = 0;
+  let gitAvailable = false;
+  const ok = (t) => rows.push(`  ✓ ${t}`);
+  const warn = (t, hint) => rows.push(`  ⚠ ${t}\n      → ${hint}`);
+  const fail = (t, hint) => {
+    failCount++;
+    rows.push(`  ✗ ${t}\n      → ${hint}`);
+  };
+
+  // 1. Node：18+ 必需；22.5+ 才能「零编译用上 node:sqlite」（默认技术栈）
+  const [maj, min] = process.versions.node.split('.').map(Number);
+  if (maj < 18) fail(`Node.js v${process.versions.node} 过低`, '本 skill 需要 18+；默认技术栈 node:sqlite 需要 22.5+，请升级');
+  else if (maj > 22 || (maj === 22 && min >= 5)) ok(`Node.js v${process.versions.node}（满足 node:sqlite）`);
+  else warn(`Node.js v${process.versions.node}`, '能跑本 skill，但默认技术栈 node:sqlite 需 22.5+，建议升级后再开发');
+
+  // 2. git
+  try {
+    execSync('git --version', { stdio: 'pipe' });
+    gitAvailable = true;
+    ok('git 可用');
+  } catch {
+    warn('git 不可用', '工作循环第一步的分支同步依赖 git');
+  }
+
+  // 3. 配置
+  if (configBroken) warn(`hackathon.config.json 无法解析（${configBroken}）`, '执行 node report.js --init --force 重新生成配置');
+  else if (cfg) ok('hackathon.config.json 就位（accessKey 已配置）');
+  else if (fs.existsSync(path.resolve(process.cwd(), 'hackathon.config.json'))) ok('hackathon.config.json 已存在');
+  else warn('hackathon.config.json 不存在', '执行 node report.js --init 完成接入（自助注册或管理员发 key）');
+
+  // 4. 服务端可达
+  if (cfg?.serverUrl) {
+    try {
+      const r = await fetch(cfg.serverUrl.replace(/\/$/, '') + '/healthz', { signal: AbortSignal.timeout(3000) });
+      r.ok ? ok(`服务端可达：${cfg.serverUrl}`) : warn(`服务端响应异常 HTTP ${r.status}`, '核对 serverUrl；持续异常联系赛事管理员');
+    } catch (e) {
+      const why = e?.cause?.code || e?.name || '';
+      if (/CERT|TLS|SSL/i.test(why)) {
+        warn(`服务端 TLS 证书异常（${why}）`, '网络是通的，但证书校验失败——内网自签证书请联系管理员，或确认 serverUrl 协议');
+      } else {
+        fail(`服务端不可达：${cfg.serverUrl}${why ? `（${why}）` : ''}`, '检查网络与地址；不影响本地开发，上报时会自动重试');
+      }
+    }
+  }
+
+  // 5. verify 配置
+  if (cfg?.verify?.api && cfg?.verify?.e2e) ok('verify.api / verify.e2e 已配置');
+  else warn('verify.api / verify.e2e 未配置完整', '「本地测试」节点前写好真实测试命令并填入配置——线上验收会执行它们，未配置的验收步骤会被跳过');
+
+  // 6. 项目工程
+  const pkg = readLocalPkg();
+  if (pkg) {
+    fs.existsSync(path.resolve(process.cwd(), 'node_modules'))
+      ? ok('npm 依赖已安装')
+      : warn('node_modules 不存在', '执行 npm install');
+    pkg.scripts?.start
+      ? ok('package.json 已定义 scripts.start（--deploy 使用）')
+      : warn('package.json 缺 scripts.start', '自动部署默认取它作为启动命令，请补充或部署时用 --start 指定');
+  } else {
+    warn('当前目录没有 package.json', '纯前端静态站可忽略；Node 项目请在此目录初始化工程');
+  }
+
+  // 7. accessKey 泄露面：config 必须被 git 忽略（git 可用时用 check-ignore 权威判定，否则退回启发式）
+  let ignored = null; // true/false/unknown
+  if (gitAvailable) {
+    try {
+      execSync('git check-ignore hackathon.config.json', { stdio: 'pipe', cwd: process.cwd() });
+      ignored = true;
+    } catch (e) {
+      ignored = e?.status === 1 ? false : null;
+    }
+  }
+  if (ignored === null) {
+    try {
+      const gi = fs.readFileSync(path.resolve(process.cwd(), '.gitignore'), 'utf-8');
+      ignored = /^.*hackathon\.config\.json\s*$/m.test(gi) && !/^!\s*hackathon\.config\.json/m.test(gi) ? true : false;
+    } catch {
+      ignored = null; // .gitignore 不存在或不可读
+    }
+  }
+  const fixHint = '该文件含 accessKey！请把 hackathon.config.json 追加进 .gitignore（可让 Agent 执行，或手动加一行），防止提交泄露';
+  if (ignored === true) ok('.gitignore 已忽略 hackathon.config.json（accessKey 不会进 git）');
+  else if (ignored === false) fail('.gitignore 未忽略 hackathon.config.json', fixHint);
+  else warn('无法确认 hackathon.config.json 是否被 git 忽略', fixHint);
+
+  // 8. 同包的 vibecoding skill
+  const setupJs = path.join(__dirname, '..', '..', 'vibecoding-workflow', 'scripts', 'setup.js');
+  if (fs.existsSync(setupJs)) {
+    rows.push(`  · 检测到 vibecoding-workflow skill：node ${path.relative(process.cwd(), setupJs).split(path.sep).join('/')} 可生成 CLAUDE.md/AGENTS.md 并做完整依赖检测`);
+  }
+
+  console.log('── 环境检测 ──────────────────');
+  for (const r of rows) console.log(r);
+
+  console.log('\n── 用户引导 · 下一步 ─────────');
+  console.log('① node report.js --next      开始八节点工作循环（Agent 代跑，关键决策由你拍板）');
+  console.log('② 需求分析：Agent 会按项目名搜索并给你一份需求模板——请亲自填写，它会用追问帮你补盲点，最终 PRD 必须逻辑闭环');
+  console.log('③ 原型阶段：可从设计模板站（如 https://designmd.app）挑一个模板把链接发给 Agent，按它实现');
+  console.log('④ 本地测试节点前，把 verify.api / verify.e2e 指向你的真实测试命令');
+  console.log('⑤ 上线后想调整需求：node report.js --loop 开新一轮（大屏会显示 LOOP×轮数）');
+  console.log('⑥ 全部完成：node report.js --submit 由你本人确认，作品定格为最终参赛评分版本');
+  console.log('──────────────────────');
+  return failCount;
+}
+
+async function cmdDoctor(args) {
+  let cfg = null;
+  let configBroken = null;
+  const p = path.resolve(process.cwd(), args.config);
+  if (fs.existsSync(p)) {
+    try {
+      cfg = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    } catch (e) {
+      configBroken = String(e.message).split('\n')[0];
+    }
+  }
+  const failCount = await runDoctor(cfg, configBroken);
+  if (failCount > 0) process.exit(1); // 与 setup.js 约定一致：1 = 存在待处理项（⚠ 不算）
 }
 
 // ---------- 迭代与最终提交 ----------

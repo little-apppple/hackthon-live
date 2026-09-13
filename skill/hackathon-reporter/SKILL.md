@@ -35,7 +35,7 @@ description: 黑客松参赛项目进度自动上报、自动部署与线上验�
 
 管理员在后台建好项目后发放 accessKey（`hk_` 开头）。引导执行 `node <skill目录>/scripts/report.js --init --server-url <地址> --access-key <密钥>`（可选 `--deploy-url`）；缺参时进入交互问答。
 
-两种模式成功后都会自动写入 `hackathon.config.json` 并展示第一个工作项，随后进入下文的「工作循环」。技能包获取：向赛事管理员索取（或从大屏服务端 `node scripts/pack-skills.js` 产出），解压到项目根目录即可；本 skill 零依赖，`node` 18+ 可运行。
+两种模式成功后都会自动写入 `hackathon.config.json`，**自动运行一轮环境检测**（Node 版本、git、服务端可达性、verify 配置、工程状态、`.gitignore` 是否忽略含 accessKey 的配置文件等）并输出六步用户引导——Agent 应把检测与引导结果转述给用户，逐项处理 ⚠/✗ 项后再进入工作循环。之后随时可单独执行 `node <skill目录>/scripts/report.js --doctor` 重新检测（无配置也可运行；存在 ✗ 项时退出码 1）。技能包获取：向赛事管理员索取（或从大屏服务端 `node scripts/pack-skills.js` 产出），解压到项目根目录即可；本 skill 零依赖，`node` 18+ 可运行。
 
 ## 工作循环（驱动流程的方式）
 

@@ -104,7 +104,7 @@ node skill/hackathon-reporter/scripts/report.js --init \
   部署端口: 4100（http://47.108.217.153:4100）
 ```
 
-**③ 开始干活**：直接进入工作循环（`--next` 查看下一节点工作项 → 完成后按给出的命令上报 → 再 `--next`）。完整循环说明见 [USERGUIDE.md §2.2](USERGUIDE.md)。
+**③ 开始干活**：`--init` 成功后会**自动运行环境检测**（Node/git/服务端可达性/verify 配置/.gitignore 是否忽略 accessKey 配置等），并输出六步「用户引导」——照着提示走即可；之后随时可单独执行 `node skill/hackathon-reporter/scripts/report.js --doctor` 重新检测。然后进入工作循环（`--next` 查看下一节点工作项 → 完成后按给出的命令上报 → 再 `--next`）。完整循环说明见 [USERGUIDE.md §2.2](USERGUIDE.md)。
 
 ### 2.2 幂等：你不用担心这些场景
 
