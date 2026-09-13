@@ -6,6 +6,14 @@ import DeptGrid from './DeptGrid.jsx';
 import Spotlight from './Spotlight.jsx';
 import EventFeed from './EventFeed.jsx';
 
+const ASCII_LOGO = String.raw`
+ _   _ _____ _   _ _____ _    _   _ ___ ___
+| | | |_   _| | | | ____| |  | | | |_ _/ __|
+| |_| | | | | |_| |  _| | |__| |_| || |\__ \
+|  _  | | | |  _  | |___|____|  _  || |___) |
+|_| |_| |_| |_| |_|_____|     |_| \___|____/
+`;
+
 export default function Dashboard() {
   const { snapshot, connected } = useSnapshot();
 
@@ -13,6 +21,11 @@ export default function Dashboard() {
     return (
       <Scale>
         <div className="boot">
+          <pre className="ascii-logo">{ASCII_LOGO.trim()}</pre>
+          <div className="ascii-tag">SIGNAL LOST · CHANNEL 47</div>
+          <div>
+            searching for live feed<span className="ascii-cursor" />
+          </div>
           <div className="boot-ring" />
           <div>正在连接赛事数据…</div>
         </div>
