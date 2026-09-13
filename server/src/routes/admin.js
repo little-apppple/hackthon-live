@@ -439,6 +439,30 @@ router.post('/deploys/:id/start', aw(async (req, res) => {
   res.json({ ok: true, status: deployer.getStatus(Number(req.params.id)) });
 }));
 
+// ---------- 自助注册令牌（技能包打包时烘入 server.json；明文仅管理员可取） ----------
+const registerTokenKey = (eventId) => `register_token:${eventId}`;
+
+function ensureRegisterToken(eventId, rotate) {
+  const key = registerTokenKey(eventId);
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  if (row && !rotate) return row.value;
+  const token = 'reg_' + crypto.randomBytes(24).toString('base64url');
+  db.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  ).run(key, token);
+  return token;
+}
+
+router.get('/register-token', (req, res) => {
+  res.json({ ok: true, eventId: resolveEventId(req), token: ensureRegisterToken(resolveEventId(req), false) });
+});
+
+// 轮换：旧技能包内的令牌随之失效，需重新打包下发
+router.post('/register-token', (req, res) => {
+  const eventId = resolveEventId(req);
+  res.json({ ok: true, eventId, token: ensureRegisterToken(eventId, true) });
+});
+
 // ---------- 元信息 ----------
 router.get('/meta', (req, res) => {
   const active = getActiveEvent();

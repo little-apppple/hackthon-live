@@ -13,29 +13,34 @@ const os = require('os');
 const { spawn, execSync } = require('child_process');
 
 const USAGE = `用法:
-  node report.js --init [--server-url <地址> --access-key <密钥>] [--deploy-url <地址>] [--force]
+  node report.js --init [--server-url <地址> --access-key <密钥>] [--deploy-url <地址>] [--force]     # 手工模式
+  node report.js --init [--department <部门> --group <小组> --project <项目名>] [--description <简介>]  # 自助注册模式（技能包内置上报地址时自动启用）
   node report.js --next [--config <路径>]
   node report.js --stage <节点标识|序号> [--message "说明"] [--config <路径>]
   node report.js --status [--config <路径>]
   node report.js --deploy [--dir <目录>] [--type node|static] [--start <命令>] [--no-install] [--config <路径>]
   node report.js --verify [--url <部署地址>] [--dry] [--config <路径>]
 节点: requirements(1) design(2) prototype(3) coding(4) testing(5) deployment(6) acceptance(7)
---init: 首次接入：生成 hackathon.config.json（缺参时进入交互问答），完成后自动展示第一个工作项
+--init 两种模式（都幂等，可安全重跑）:
+  自助注册: 技能包内置上报地址（server.json）且未提供 --access-key 时启用——引导填写部门/小组/项目名，
+            发送到服务端注册（录入名单、预留部署端口）并返回 accessKey；相同「部门/小组/项目名」
+            只生成一次密钥，重复执行返回同一密钥
+  手工模式: 提供 --access-key（管理员发放）时启用；缺 server-url 时进入交互问答
 --next: 查看下一节点工作项（工作循环入口：--next → 干活 → 上报 → 再 --next）
 --deploy: 打包并上传到服务端自动部署到预留端口，探活通过后自动上报「上线部署」
 --verify: 探活 + 接口测试 + E2E 全部通过后自动上报「线上验收」（退出码 3 = 验证未通过）`;
 
-const ONBOARDING = `── 首次使用接入引导 ──────────────────────────────
-本 skill 驱动你的比赛全流程，接入只需两步：
-
-① 向赛事管理员索取两样东西：
-   - 赛事服务端地址（形如 http://<服务器IP>:<端口>）
-   - 本项目的 accessKey（hk_ 开头，报名后由管理员发放）
-
-② 在项目根目录执行自动配置：
+const ONBOARDING = `── 首次使用接入引导（两种模式任选其一）──────────────
+模式 A · 自助注册（推荐，技能包内置上报地址时自动生效）：
    node report.js --init
-   （交互式问答；也可一次性带参：
-     node report.js --init --server-url http://… --access-key hk_…）
+   按提示填写部门、小组、项目名称即可，服务端自动录入名单、
+   预留部署端口并发放 accessKey；相同「部门/小组/项目名」只发一次密钥，
+   重复执行返回同一密钥（幂等），可安全重跑。
+   也可一次性带参：node report.js --init --department <部门> --group <小组> --project <项目名>
+
+模式 B · 管理员发放（后台建好项目后发 key）：
+   向赛事管理员索取两样东西：赛事服务端地址、本项目 accessKey（hk_ 开头）
+   node report.js --init --server-url http://… --access-key hk_…
 
 配置完成后执行 node report.js --next 即可开始比赛流程：
   --next 查看下一节点工作项 → 干活 → 按给出的命令上报 → 再 --next
@@ -100,6 +105,11 @@ function parseArgs(argv) {
     else if (a === '--server-url') args.serverUrl = argv[++i];
     else if (a === '--access-key') args.accessKey = argv[++i];
     else if (a === '--deploy-url') args.deployUrl = argv[++i];
+    else if (a === '--department') args.department = argv[++i];
+    else if (a === '--group') args.group = argv[++i];
+    else if (a === '--project') args.project = argv[++i];
+    else if (a === '--description') args.description = argv[++i];
+    else if (a === '--register-token') args.registerToken = argv[++i];
     else if (a === '--force') args.force = true;
     else if (a === '--verify') args.verify = true;
     else if (a === '--deploy') args.deploy = true;
@@ -249,6 +259,47 @@ async function ask(rl, question) {
   return rl.question(question);
 }
 
+// 技能包内置的上报地址与注册令牌（打包时写入 server.json；源码仓库里为空占位）
+function bakedConfig() {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'server.json'), 'utf-8'));
+    return {
+      serverUrl: String(j.serverUrl || '').trim().replace(/\/+$/, ''),
+      registerToken: String(j.registerToken || '').trim(),
+    };
+  } catch {
+    return { serverUrl: '', registerToken: '' };
+  }
+}
+
+// 注册模式：向服务端自助注册换取 accessKey（幂等，可安全重跑）
+async function registerOnServer(serverUrl, registerToken, { department, group, project, description }) {
+  const payload = JSON.stringify({ department, group, project, description: description || '', registerToken });
+  const { status, body } = await callApiWithRetry(
+    { serverUrl },
+    '/api/register',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload }
+  );
+  if (status === 200 && body?.ok) {
+    if (body.revoked) {
+      console.error('⚠ 该「部门/小组/项目名」对应的密钥已被管理员吊销，请联系赛事管理员恢复后再继续。');
+      process.exit(1);
+    }
+    return body;
+  }
+  if (status === 404) {
+    console.error('✗ 注册失败：服务端不支持自助注册（HTTP 404）。服务端版本可能过旧——请改用管理员发 key 模式：');
+    console.error('  node report.js --init --server-url <地址> --access-key <密钥>');
+    process.exit(1);
+  }
+  if (status === 401 && body?.code === 'REGISTER_TOKEN_INVALID') {
+    console.error('✗ 注册失败：注册令牌缺失或不正确。请使用本期下发的技能包（内含注册令牌），或改用管理员发 key 模式。');
+    process.exit(1);
+  }
+  console.error(`✗ 注册失败 [${body?.code || 'HTTP ' + status}]: ${body?.error || '未知错误'}`);
+  process.exit(1);
+}
+
 async function cmdInit(args) {
   const target = path.resolve(process.cwd(), 'hackathon.config.json');
   if (fs.existsSync(target) && !args.force) {
@@ -257,11 +308,74 @@ async function cmdInit(args) {
     return cmdNext(args, loadConfig(args.config));
   }
 
-  let serverUrl = args.serverUrl;
+  const baked = bakedConfig();
+  let serverUrl = args.serverUrl || baked.serverUrl;
   let accessKey = args.accessKey;
   let deployUrl = args.deployUrl;
 
-  if (!serverUrl || !accessKey) {
+  if (accessKey && (args.department || args.group || args.project)) {
+    console.warn('⚠ 已提供 --access-key（手工模式），忽略 --department/--group/--project 注册参数');
+  }
+
+  if (serverUrl && !accessKey) {
+    // ── 模式 A：自助注册（技能包内置上报地址，未提供 accessKey）──
+    const department = args.department;
+    const group = args.group;
+    const project = args.project;
+    if (!department || !group || !project) {
+      console.log(`== 黑客松自助注册 ==（服务端：${serverUrl}）`);
+      console.log('填写部门 / 小组 / 项目名称，服务端自动录入名单、预留部署端口并发放 accessKey');
+      console.log('（幂等：相同「部门/小组/项目名」只发一次密钥，重复执行返回同一密钥）\n');
+      const readline = require('readline/promises');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const d = department || (await ask(rl, '① 部门: ')).trim();
+        const g = group || (await ask(rl, '② 小组: ')).trim();
+        const p = project || (await ask(rl, '③ 项目名称: ')).trim();
+        args.department = d;
+        args.group = g;
+        args.project = p;
+        if (!args.description) {
+          const desc = (await ask(rl, '④ 项目一句话简介（可回车跳过）: ')).trim();
+          if (desc) args.description = desc;
+        }
+      } finally {
+        rl.close();
+      }
+    }
+    if (!args.department || !args.group || !args.project) {
+      console.error('✗ 部门 / 小组 / 项目名称均不能为空（各限 50 字符内）');
+      process.exit(2);
+    }
+    for (const [label, v] of [['部门', args.department], ['小组', args.group], ['项目名称', args.project]]) {
+      if (String(v).trim().length > 50) {
+        console.error(`✗ ${label}超过 50 字符，请缩短后重试`);
+        process.exit(2);
+      }
+    }
+    if (!baked.registerToken && !args.registerToken) {
+      console.error('✗ 缺少注册令牌（技能包 server.json 或 --register-token 参数）——请使用本期下发的技能包，或改用管理员发 key 模式：');
+      console.error('  node report.js --init --server-url <地址> --access-key <密钥>');
+      process.exit(1);
+    }
+    console.log(`\n→ 向服务端注册（${serverUrl}）…`);
+    const r = await registerOnServer(serverUrl, args.registerToken || baked.registerToken, {
+      department: args.department,
+      group: args.group,
+      project: args.project,
+      description: args.description,
+    });
+    accessKey = r.accessKey;
+    deployUrl = r.deployUrl;
+    console.log(
+      r.idempotent
+        ? '✓ 该「部门/小组/项目名」已注册过，返回原有 accessKey（幂等下发）'
+        : '✓ 注册成功，已录入名单并预留部署端口'
+    );
+    console.log(`  accessKey: ${accessKey}`);
+    console.log(`  部署端口: ${r.port}（${r.deployUrl}）`);
+  } else if (!serverUrl || !accessKey) {
+    // ── 模式 B：管理员发放（原有交互）──
     console.log('== 黑客松 skill 首次接入 ==');
     console.log('需要两样东西（向赛事管理员索取）：服务端地址、本项目 accessKey\n');
     const readline = require('readline/promises');

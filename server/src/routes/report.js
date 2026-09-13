@@ -1,12 +1,22 @@
 'use strict';
+const crypto = require('crypto');
 const express = require('express');
 const db = require('../db');
 const config = require('../config');
 const { stageByRef, stageByIndex, deriveStatus, progressPercent, DEPLOY_STAGE_INDEX } = require('../stages');
 const { notifyRefresh } = require('../sse');
-const { probeLocalPort } = require('../ports');
+const { allocatePort, probeLocalPort } = require('../ports');
+const { getActiveEvent } = require('../events');
 
 const router = express.Router();
+
+function isUniqueViolation(e) {
+  return e?.errcode === 2067 || /UNIQUE constraint failed/i.test(e?.message || '');
+}
+
+function genAccessKey() {
+  return 'hk_' + crypto.randomBytes(16).toString('hex');
+}
 
 // Express 4 不捕获 async 异常，统一包装防止进程崩溃
 const aw = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -142,6 +152,140 @@ router.post('/report', aw(async (req, res) => {
     deployProbe: deployProbe ? (deployProbe.ok ? 'ok' : 'unreachable') : undefined,
     nextStage: next,
     message: finalMessage,
+  });
+}));
+
+// 自助注册（技能包 --init 注册模式）：幂等——同一当前活动内「部门/小组/项目名」
+// 只生成一次 accessKey，重复调用返回同一密钥（可安全重跑、可多处下发）。
+// 安全模型：注册需携带本期活动的注册令牌（管理员经 /api/admin/register-token 签发、
+// 打包技能包时烘入 server.json），防止用公开大屏上的部门/小组/项目名推导任意 accessKey；
+// 每 IP 限频；成功注册写入审计。
+const registerAttempts = new Map(); // ip -> epoch ms 数组
+setInterval(() => {
+  const cutoff = Date.now() - 60 * 1000;
+  for (const [ip, arr] of registerAttempts) {
+    if (!arr.some((t) => t >= cutoff)) registerAttempts.delete(ip);
+  }
+}, 60 * 1000).unref();
+function registerRateLimited(ip) {
+  const now = Date.now();
+  const arr = (registerAttempts.get(ip) || []).filter((t) => now - t < 60 * 1000);
+  if (arr.length >= 10) return true;
+  arr.push(now);
+  registerAttempts.set(ip, arr);
+  return false;
+}
+function verifyRegisterToken(eventId, token) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(`register_token:${eventId}`);
+  if (!row || typeof token !== 'string' || !token) return false;
+  const a = Buffer.from(String(token).trim());
+  const b = Buffer.from(row.value);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+router.post('/register', aw(async (req, res) => {
+  const ip = req.ip || '';
+  if (registerRateLimited(ip)) {
+    return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: '注册请求过于频繁，请稍后重试', retryAfterSeconds: 60 });
+  }
+  const norm = (v) => String(v ?? '').trim().slice(0, 50);
+  const deptName = norm(req.body?.department);
+  const groupName = norm(req.body?.group);
+  const projectName = norm(req.body?.project);
+  const description = String(req.body?.description ?? '').trim().slice(0, 200);
+  if (!deptName || !groupName || !projectName) {
+    return res.status(400).json({
+      ok: false,
+      code: 'INVALID_PARAMS',
+      error: 'department / group / project 均不能为空（各限 50 字符内）',
+    });
+  }
+  const event = getActiveEvent();
+  if (!verifyRegisterToken(event.id, req.body?.registerToken)) {
+    return res.status(401).json({
+      ok: false,
+      code: 'REGISTER_TOKEN_INVALID',
+      error: '注册令牌缺失或不正确：请使用本期下发的技能包（内含注册令牌），或向赛事管理员索取',
+    });
+  }
+
+  const findProject = () =>
+    db
+      .prepare(
+        `SELECT p.* FROM projects p
+           JOIN groups g ON g.id = p.group_id
+           JOIN departments d ON d.id = g.department_id
+          WHERE p.event_id = ? AND d.name = ? AND g.name = ? AND p.name = ? AND p.archived = 0`
+      )
+      .get(event.id, deptName, groupName, projectName);
+
+  let project = findProject();
+  let createdNow = false;
+  if (!project) {
+    // 端口探测含异步 IO，放事务外；并发重入由事务内的二次查找兜底。
+    // 开赛集中注册时并发请求会探到同一个空闲端口，端口唯一约束冲突时换端口重试（最多 3 次）。
+    let port = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        if (port === null) port = await allocatePort();
+      } catch (e) {
+        if (e.code === 'NO_FREE_PORT') {
+          return res.status(503).json({ ok: false, code: 'NO_FREE_PORT', error: e.message });
+        }
+        throw e;
+      }
+      try {
+        const tx = db.transaction(() => {
+          let dept = db.prepare('SELECT id FROM departments WHERE event_id = ? AND name = ?').get(event.id, deptName);
+          if (!dept) db.prepare('INSERT INTO departments (event_id, name) VALUES (?, ?)').run(event.id, deptName);
+          dept = db.prepare('SELECT id FROM departments WHERE event_id = ? AND name = ?').get(event.id, deptName);
+          let group = db.prepare('SELECT id FROM groups WHERE department_id = ? AND name = ?').get(dept.id, groupName);
+          if (!group) db.prepare('INSERT INTO groups (event_id, department_id, name) VALUES (?, ?, ?)').run(event.id, dept.id, groupName);
+          group = db.prepare('SELECT id FROM groups WHERE department_id = ? AND name = ?').get(dept.id, groupName);
+          const again = db
+            .prepare('SELECT * FROM projects WHERE event_id = ? AND group_id = ? AND name = ? AND archived = 0')
+            .get(event.id, group.id, projectName);
+          if (again) return { project: again, created: false }; // 并发重入：另一请求刚建好，直接复用
+          const info = db
+            .prepare('INSERT INTO projects (event_id, group_id, name, description, access_key, port) VALUES (?, ?, ?, ?, ?, ?)')
+            .run(event.id, group.id, projectName, description, genAccessKey(), port);
+          return { project: db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid), created: true };
+        });
+        const run = tx(); // transaction() 返回包装函数，必须调用才执行
+        project = run.project;
+        createdNow = run.created;
+        break;
+      } catch (e) {
+        if (isUniqueViolation(e) && attempt < 3) {
+          port = null; // 端口在探测后被并发占用：换下一个候选端口重来
+          continue;
+        }
+        if (isUniqueViolation(e)) {
+          return res.status(409).json({ ok: false, code: 'PORT_CONFLICT', error: '注册冲突（端口/密钥刚被占用），请重试' });
+        }
+        throw e;
+      }
+    }
+    notifyRefresh('project-created');
+  }
+  audit(project.id, 'register', 1, null, createdNow ? '自助注册（新项目）' : '自助注册（幂等补发密钥）', ip);
+
+  res.json({
+    ok: true,
+    code: 'REGISTERED',
+    idempotent: !createdNow,
+    revoked: !!project.revoked,
+    warning: project.revoked ? '该密钥已被管理员吊销，请联系赛事管理员恢复' : undefined,
+    eventId: event.id,
+    projectName: project.name,
+    accessKey: project.access_key,
+    port: project.port,
+    deployUrl: `http://${config.publicHost}:${project.port}`,
+    configTemplate: {
+      serverUrl: `http://${config.publicHost}:${config.port}`,
+      accessKey: project.access_key,
+      deployUrl: `http://${config.publicHost}:${project.port}`,
+    },
   });
 }));
 

@@ -9,7 +9,7 @@ description: 黑客松参赛项目进度自动上报、自动部署与线上验�
 
 ## 前置条件
 
-参赛项目根目录必须存在 `hackathon.config.json`（管理员发放）：
+参赛项目根目录必须存在 `hackathon.config.json`（由 `--init` 生成，见下节两种模式）：
 
 ```json
 {
@@ -19,17 +19,23 @@ description: 黑客松参赛项目进度自动上报、自动部署与线上验�
 }
 ```
 
-若文件不存在：停止上报，提示用户向赛事管理员索取。
+若文件不存在：**不要直接报错了事**，引导用户执行 `node <skill目录>/scripts/report.js --init` 完成接入（技能包内置上报地址与注册令牌时自动进入自助注册模式；否则走管理员发 key 模式）。
 
-## 首次接入（自动引导）
+## 首次接入（两种模式，均幂等可重跑）
 
-在某个参赛项目中**第一次**使用本 skill 时（判定：项目根目录没有 `hackathon.config.json`），不要直接报错了事，先向用户展示接入引导：
+在某个参赛项目中**第一次**使用本 skill 时（判定：项目根目录没有 `hackathon.config.json`），不要直接报错了事，先向用户展示接入引导。`--init` 有两种模式：
 
-1. 告知用户需要向赛事管理员索取两样东西：**赛事服务端地址**、**本项目的 accessKey**（`hk_` 开头，报名后发放）；
-2. 引导执行 `node <skill目录>/scripts/report.js --init`（交互式问答生成配置；Agent 也可拿到两项信息后代填：`--init --server-url <地址> --access-key <密钥>`，可选 `--deploy-url`）；
-3. `--init` 成功后会自动展示第一个工作项，随后进入下文的「工作循环」。
+**模式 A · 自助注册（推荐，技能包内置上报地址与注册令牌时自动启用）**
 
-如果用户只装了 skill 还没有 accessKey：说明报名/建项目由管理员在后台完成，拿到配置后即可开始，无需其他安装步骤（本 skill 零依赖，`node` 18+ 可运行）。
+技能包的 `skill/hackathon-reporter/server.json` 内置了上报地址和本期**注册令牌**（管理员打包时写入）。此时执行 `node <skill目录>/scripts/report.js --init` 会引导填写**部门、小组、项目名称**（Agent 可代填：`--init --department <部门> --group <小组> --project <项目名>`，可选 `--description`，各限 50 字符），发送到服务端 `/api/register` 完成报名：录入名单、预留部署端口、发放 accessKey，并写入服务端审计（stage=register）。
+
+**幂等语义：相同「部门/小组/项目名」只生成一次密钥，重复执行返回同一 accessKey**——可安全重跑、可多处补发配置；同组不同项目名是不同项目、各自有独立密钥。若返回的密钥已被管理员吊销，CLI 会停止并提示联系管理员。
+
+**模式 B · 管理员发放**
+
+管理员在后台建好项目后发放 accessKey（`hk_` 开头）。引导执行 `node <skill目录>/scripts/report.js --init --server-url <地址> --access-key <密钥>`（可选 `--deploy-url`）；缺参时进入交互问答。
+
+两种模式成功后都会自动写入 `hackathon.config.json` 并展示第一个工作项，随后进入下文的「工作循环」。技能包获取：向赛事管理员索取（或从大屏服务端 `node scripts/pack-skills.js` 产出），解压到项目根目录即可；本 skill 零依赖，`node` 18+ 可运行。
 
 ## 工作循环（驱动流程的方式）
 
