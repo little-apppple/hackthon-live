@@ -11,7 +11,9 @@ dashboard/
 ├─ server/            # Express API + SSE + SQLite（单进程生产服务，node:sqlite 内置驱动）
 ├─ web/               # Vite + React：大屏页(/) + 管理后台(/admin)
 ├─ skill/hackathon-reporter/   # 发给参赛项目的上报 skill（SKILL.md + report.js）
+├─ skill/vibecoding-workflow/  # Vibe Coding 开发流程 skill（卡点与上报七节点对齐 + setup.js）
 ├─ scripts/seed.js    # 初始名单导入
+├─ scripts/pack-skills.js # 打参赛技能包（tgz，内置上报地址，参赛者 --init 自助注册）
 ├─ scripts/smoke.js   # 端到端冒烟测试
 ├─ scripts/verify-e2e.js # 验收自动化端到端测试
 ├─ scripts/deploy-e2e.js # 自动部署端到端测试
@@ -67,6 +69,21 @@ npm run deploy:e2e     # 自动部署端到端测试（node/static/自动上报/
 - 大屏：`http://localhost:3000/`
 - 管理后台：`http://localhost:3000/admin`（默认密码 `hackathon2026`）
 - 开发模式：`npm run dev:server` + `npm run dev:web`（Vite 5173，/api 自动代理）
+- 技能包下发：`node scripts/pack-skills.js --host http://<对外IP>:<端口>` 产出 `hackathon-skills.tgz`（已内置上报地址）。参赛者解压到项目根后执行 `node skill/hackathon-reporter/scripts/report.js --init`，填部门/小组/项目名即完成报名并换取 accessKey——幂等：相同「部门/小组/项目名」只发一次密钥，重复执行返回同一密钥；管理员后台手工建项目发 key 的流程继续可用（`--init --server-url … --access-key …`）。
+
+## Vibe Coding 开发流程 skill
+
+`skill/vibecoding-workflow/` 把《Vibe Coding 开发流程与体系》落成可执行的 agent 流程，其七个卡点与 hackathon-reporter 的七节点上报一一对应（requirements → design → prototype → coding → testing → deployment → acceptance）。在任何项目根目录运行：
+
+```bash
+node skill/vibecoding-workflow/scripts/setup.js          # 检测依赖（Node≥18/git/reporter skill）+ 生成缺失的 CLAUDE.md、AGENTS.md
+node skill/vibecoding-workflow/scripts/setup.js --fix    # 自动安装：npm 依赖 + 把两个 skill 同步进 .claude/skills/
+node skill/vibecoding-workflow/scripts/setup.js --force  # 覆盖重新生成 CLAUDE.md / AGENTS.md
+node skill/vibecoding-workflow/scripts/setup.js --check  # 只检测不改动
+node skill/vibecoding-workflow/scripts/setup.js --project <目录>  # 面向其他项目执行
+```
+
+零依赖（Node 18+），退出码 0/1 表示有无待处理项；本仓库根目录的 CLAUDE.md / AGENTS.md 即由它生成。
 
 ## 环境变量
 
@@ -107,6 +124,7 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/report` | 上报节点完成 `{accessKey, stage, message, evidence?}` |
+| POST | `/api/register` | 自助注册：`{department, group, project, registerToken, description?}` → 录入名单+预留端口+发 accessKey；幂等（同名只发一次 key）。需本期注册令牌（管理员 `/api/admin/register-token` 签发）；错误码 `INVALID_PARAMS` / `REGISTER_TOKEN_INVALID` / `NO_FREE_PORT` / `PORT_CONFLICT`，每 IP 限频 10 次/分钟（按直连 IP 计，勿置于无 realip 配置的反向代理之后） |
 | GET | `/api/report/status?accessKey=` | 查询进度、下一节点与预留端口 |
 | POST | `/api/deploy?accessKey=&type=&start=&install=` | 上传构建产物（raw tgz/zip body）自动部署 |
 | GET | `/api/deploy/status?accessKey=` | 查询部署进程状态 |
