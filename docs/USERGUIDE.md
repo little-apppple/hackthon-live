@@ -10,9 +10,11 @@
 
 | 角色 | 你要做的事 | 入口 |
 |---|---|---|
-| 管理员 | 建活动 → 录名单 → 建项目发 accesskey → 把 skill 和配置发给各队 | `/admin` |
-| 参赛小组 | 把配置放进项目根目录，让 AI Agent 执行 `report.js --next` 开始循环干活 | 项目根目录 |
+| 管理员 | 建活动 →（方式 A）打包技能包下发让各队自助注册 /（方式 B）录名单 → 建项目发 accesskey | `/admin` |
+| 参赛小组 | 解压技能包到项目根，执行 `report.js --init` 完成报名，然后让 AI Agent 执行 `report.js --next` 开始循环干活 | 项目根目录 |
 | 评委/观众 | 看大屏进度，项目"已上线"后点「▶ 打开项目」体验作品 | `/` |
+
+> 技能包下发与自助注册的完整说明见 [REGISTRATION.md](REGISTRATION.md)。
 
 ---
 
@@ -40,7 +42,10 @@
 后台 →「项目与密钥」→ 选部门 → 选小组 → 填项目名 → 「创建并生成密钥」。系统自动生成 accesskey 并**预留一个空闲端口**，弹窗里有一键复制的配置 JSON——把它发给该小组。
 
 **④ 发放上报 skill**
-把仓库里 `skill/hackathon-reporter/` 整个目录发给各参赛小组（放进他们 AI Agent 的 skill 目录即可）。
+二选一（详见 [REGISTRATION.md](REGISTRATION.md)）：
+
+- **方式 A · 技能包自助注册（推荐）**：`node scripts/pack-skills.js --server http://47.108.217.153:50000` 打出 `hackathon-skills.tgz` 发到参赛群，各队解压后 `--init` 填部门/小组/项目名自动报名（幂等，同名只发一次密钥）；
+- **方式 B · 手工发放**：把仓库里 `skill/hackathon-reporter/` 整个目录发给各参赛小组（放进他们 AI Agent 的 skill 目录即可），accesskey 由后台逐队创建发放（见 ③）。
 
 ### 1.2 比赛中
 
@@ -64,9 +69,8 @@
 
 ### 2.1 你会拿到什么
 
-1. 一个 **accesskey**（`hk_` 开头的字符串）；
-2. 赛事服务端地址（即大屏地址）；
-3. 上报技能目录 `hackathon-reporter/`（装进你的 AI 编程 Agent 的技能库）。
+1. 一个 **技能包** `hackathon-skills.tgz`（内含上报 CLI 与注册令牌）——解压后 `--init` 填三个名字自动报名换取 accesskey（见 [REGISTRATION.md](REGISTRATION.md)）；
+   或者手工路径：一个 **accesskey**（`hk_` 开头的字符串）+ 赛事服务端地址 + 上报技能目录 `hackathon-reporter/`（装进你的 AI 编程 Agent 的技能库）。
 
 在**参赛项目根目录**执行一条命令完成接入（交互式问答，Agent 也可代填参数）：
 
