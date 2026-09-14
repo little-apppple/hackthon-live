@@ -7,14 +7,6 @@ const STATUS_TEXT = {
   done: '已完成',
   submitted: '已提交',
 };
-const STATUS_CLASS = {
-  loading: 'st-loading',
-  active: 'st-active',
-  deployed: 'st-deployed',
-  done: 'st-done',
-  submitted: 'st-submitted',
-};
-
 export default function ProjectCard({ project, stages }) {
   const revoked = !!project.revoked;
   const status = revoked ? 'revoked' : project.status;
@@ -25,7 +17,7 @@ export default function ProjectCard({ project, stages }) {
   const loop = project.loop_count || 1;
 
   return (
-    <div className={`project-card ${STATUS_CLASS[status] || ''} ${revoked ? 'is-revoked' : ''}`} data-status={status}>
+    <div className={`project-card ${revoked ? 'is-revoked' : ''}`} data-status={status}>
       <div className="pc-top">
         <span className="pc-name" title={project.name}>
           {project.name}

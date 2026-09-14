@@ -7,7 +7,6 @@ export default function ProjectsPanel({ eventId }) {
   const [groups, setGroups] = useState([]);
   const [projects, setProjects] = useState([]);
   const [pool, setPool] = useState(null);
-  const [meta, setMeta] = useState(null);
   const [deploys, setDeploys] = useState({});
   const [deptId, setDeptId] = useState('');
   const [groupId, setGroupId] = useState('');
@@ -19,12 +18,11 @@ export default function ProjectsPanel({ eventId }) {
   const [poolEdit, setPoolEdit] = useState(null);
 
   const loadAll = useCallback(async () => {
-    const [d, g, p, port, m, dep] = await Promise.all([
+    const [d, g, p, port, dep] = await Promise.all([
       api.get(`/api/admin/departments?eventId=${eventId}`),
       api.get(`/api/admin/groups?eventId=${eventId}`),
       api.get(`/api/admin/projects?eventId=${eventId}`),
       api.get('/api/admin/ports'),
-      api.get('/api/admin/meta'),
       api.get('/api/admin/deploys'),
     ]);
     if (d.data?.ok) {
@@ -34,7 +32,6 @@ export default function ProjectsPanel({ eventId }) {
     if (g.data?.ok) setGroups(g.data.groups);
     if (p.data?.ok) setProjects(p.data.projects);
     if (port.data?.ok) setPool(port.data.pool);
-    if (m.data?.ok) setMeta(m.data);
     if (dep.data?.ok) {
       setDeploys(Object.fromEntries((dep.data.deploys || []).map((x) => [x.projectId, x])));
     }
@@ -218,13 +215,16 @@ export default function ProjectsPanel({ eventId }) {
               <tr key={p.id} className={p.archived ? 'row-archived' : ''}>
                 <td>{p.department_name}</td>
                 <td>{p.group_name}</td>
-                <td className="cell-name" title={p.description}>{p.name}</td>
+                <td className="cell-name" title={p.description}>
+                  {p.name}
+                  {(p.loop_count || 1) > 1 && <span className="mini-num">LOOP×{p.loop_count}</span>}
+                </td>
                 <td className="mono">{p.port}</td>
                 <td>
                   <div className="mini-bar">
-                    <div style={{ width: `${Math.round((p.completed_stages / 7) * 100)}%` }} />
+                    <div style={{ width: `${Math.round((p.completed_stages / 8) * 100)}%` }} />
                   </div>
-                  <span className="mini-num">{Math.round((p.completed_stages / 7) * 100)}%</span>
+                  <span className="mini-num">{Math.round((p.completed_stages / 8) * 100)}%</span>
                 </td>
                 <td>
                   <span className={`status-chip c-${p.archived ? 'archived' : p.revoked ? 'revoked' : p.status}`}>

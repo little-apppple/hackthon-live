@@ -1,6 +1,6 @@
 # 企业黑客松大赛实时大屏系统
 
-Node.js 全栈（Express + node:sqlite + Vite/React/ECharts）的黑客松现场驾驶舱：**多期活动数据完全隔离**，大屏实时展示 **部门 → 小组 → 项目** 三级进度，项目通过 **上报 Skill** 自动汇报 7 个流程节点、`--deploy` 自动部署到预留端口、`--verify` 自动化线上验收。SQLite 使用 Node 22.5+ 内置的 `node:sqlite`，无需任何原生编译。
+Node.js 全栈（Express + node:sqlite + Vite/React/ECharts）的黑客松现场驾驶舱：**多期活动数据完全隔离**，大屏实时展示 **部门 → 小组 → 项目** 三级进度，项目通过 **上报 Skill** 自动汇报 8 个流程节点（最终提交由用户本人确认）、`--deploy` 自动部署到预留端口、`--verify` 自动化线上验收。SQLite 使用 Node 22.5+ 内置的 `node:sqlite`，无需任何原生编译。
 
 完整需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，**分角色使用手册见 [docs/USERGUIDE.md](docs/USERGUIDE.md)**（管理员 / 参赛小组 / 评委观众），**技能包下发与自助注册手册见 [docs/REGISTRATION.md](docs/REGISTRATION.md)**。
 
@@ -61,7 +61,7 @@ npm start              # 启动服务（默认 http://localhost:3000）
 
 ```bash
 npm run demo           # 生成各阶段混合的演示项目数据（开发/演示用）
-npm run smoke          # 端到端冒烟测试（75 项断言：认证/CSV/上报强约束/探活/吊销/端口复用/审计/活动隔离/端口区间）
+npm run smoke          # 端到端冒烟测试（104 项断言：认证/CSV/上报强约束/探活/吊销/端口复用/审计/活动隔离/端口区间/自助注册/loop 迭代/最终提交）
 npm run verify:e2e     # 验收自动化端到端测试（通过/失败/未部署三条路径）
 npm run deploy:e2e     # 自动部署端到端测试（node/static/自动上报/重启停止/未到节点）
 ```
@@ -69,8 +69,8 @@ npm run deploy:e2e     # 自动部署端到端测试（node/static/自动上报/
 - 大屏：`http://localhost:3000/`
 - 管理后台：`http://localhost:3000/admin`（默认密码 `hackathon2026`）
 - 开发模式：`npm run dev:server` + `npm run dev:web`（Vite 5173，/api 自动代理）
-- 迭代口径：`--loop` 开新一轮后进度与 KPI 按**当前轮次**统计（历史在审计流）；loop 后大屏项目卡链接暂时熄灭（进入新一轮），但服务端部署进程仍在运行，重新部署后链接恢复
-- 技能包下发：`node scripts/pack-skills.js --host http://<对外IP>:<端口>` 产出 `hackathon-skills.tgz`（已内置上报地址）。参赛者解压到项目根后执行 `node skill/hackathon-reporter/scripts/report.js --init`，填部门/小组/项目名即完成报名并换取 accessKey——幂等：相同「部门/小组/项目名」只发一次密钥，重复执行返回同一密钥；管理员后台手工建项目发 key 的流程继续可用（`--init --server-url … --access-key …`）。
+- 迭代口径：`--loop` 开新一轮后进度与 KPI 按**当前轮次**统计（历史在审计流）；loop 后大屏项目卡链接暂时熄灭（进入新一轮），需在新一轮重新走到「上线部署」节点后链接才恢复（服务端部署进程在旧链接熄灭期间仍在运行，可从后台管理）
+- 技能包下发：`node scripts/pack-skills.js --server http://<对外IP>:<端口>`（`--host` 为别名）产出 `hackathon-skills.tgz`（已内置上报地址）。参赛者解压到项目根后执行 `node skill/hackathon-reporter/scripts/report.js --init`，填部门/小组/项目名即完成报名并换取 accessKey——幂等：相同「部门/小组/项目名」只发一次密钥，重复执行返回同一密钥；管理员后台手工建项目发 key 的流程继续可用（`--init --server-url … --access-key …`）。
 
 ## Vibe Coding 开发流程 skill
 
@@ -98,6 +98,8 @@ node skill/vibecoding-workflow/scripts/setup.js --project <目录>  # 面向其�
 | `EVENT_END_TIME` | 空 | 比赛倒计时截止时间（ISO，如 `2026-09-05T18:00:00`），空则不显示 |
 | `DB_PATH` | server/data/hackathon.db | SQLite 文件路径 |
 | `RATE_LIMIT_MS` | 10000 | 每项目上报最小间隔 |
+| `SESSION_TTL_MS` | 86400000 | 管理后台会话有效期 |
+| `DEPLOY_PATH_PREPEND` | - | 部署进程 PATH 前置目录（如 /opt/node22/bin） |
 | `DEPLOY_ROOT` | server/data/deploys | 自动部署产物与运行目录 |
 | `DEPLOY_MAX_MB` | 200 | 部署产物大小上限 |
 | `DEPLOY_START_TIMEOUT_MS` | 60000 | 部署启动探活超时 |
@@ -114,7 +116,7 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 2. **赛前或赛中**：项目与密钥 → 选部门 → 选小组 → 填项目名 → 创建。系统一个事务内生成 accesskey 并预留一个空闲端口，弹窗里一键复制发给小组的 `hackathon.config.json`。
 3. **发放 skill**：把 `skill/hackathon-reporter/` 整个目录发给各参赛小组，放入其 AI 编程 Agent 的 skill 目录；小组把配置写入参赛项目根目录 `hackathon.config.json`。
 4. **赛中**：小组的 Agent 每完成一个节点自动上报，大屏 SSE 实时刷新。
-5. **自动部署（上线部署节点）**：小组 Agent 执行 `node report.js --deploy`——自动打包上传（排除 node_modules/.git），服务端解压到 `data/deploys/<项目ID>/`、按需 `npm install`、以预留端口启动（或托管静态站），60 秒内探活通过后**自动上报「上线部署」**并点亮大屏链接。崩溃自动重启（最多 10 次），服务重启后自动恢复全部部署。
+5. **自动部署（上线部署节点）**：小组 Agent 执行 `node report.js --deploy`——自动打包上传（排除 node_modules/.git），服务端解压到 `data/deploys/<项目ID>/`、按需 `npm install`、以预留端口启动（或托管静态站），60 秒内探活通过后**自动上报「上线部署」**并点亮大屏链接。崩溃自动重启（最多 10 次）；服务重启后只恢复**当前活动**的部署进程。
 6. **线上验收（自动化）**：小组 Agent 执行 `node report.js --verify`——依次完成**线上应用探活 → 接口测试（`verify.api`）→ E2E 测试（`verify.e2e`）**，全部通过后自动上报验收并附证据；任一步失败则不上报（退出码 3），修复后重试。
 7. **监管**：后台可查看各项目部署进程状态、停止/启动/重启；可随时吊销/恢复 accesskey、归档项目（归档自动停服并释放端口）；所有上报（含被拒）与部署/验收证据都有审计记录。
 
@@ -126,7 +128,8 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 |---|---|---|
 | POST | `/api/report` | 上报节点完成 `{accessKey, stage, message, evidence?}` |
 | POST | `/api/register` | 自助注册：`{department, group, project, registerToken, description?}` → 录入名单+预留端口+发 accessKey；幂等（同名只发一次 key）。需本期注册令牌（管理员 `/api/admin/register-token` 签发）；错误码 `INVALID_PARAMS` / `REGISTER_TOKEN_INVALID` / `NO_FREE_PORT` / `PORT_CONFLICT`，每 IP 限频 10 次/分钟（按直连 IP 计，勿置于无 realip 配置的反向代理之后） |
-| GET | `/api/report/status?accessKey=` | 查询进度、下一节点与预留端口 |
+| GET | `/api/report/status?accessKey=` | 查询进度（含 loopCount）、下一节点与预留端口 |
+| POST | `/api/loop` | `{accessKey}` 开新一轮迭代：进度重置、loop_count+1（≥上线部署才允许）；409 `LOOP_NOT_ALLOWED` |
 | POST | `/api/deploy?accessKey=&type=&start=&install=` | 上传构建产物（raw tgz/zip body）自动部署 |
 | GET | `/api/deploy/status?accessKey=` | 查询部署进程状态 |
 | GET | `/api/snapshot` | 大屏全量快照 |
@@ -135,9 +138,9 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 
 管理（需 Cookie）：
 
-`POST /api/admin/login` · `GET/POST/PUT/DELETE /api/admin/events` · `POST /api/admin/events/:id/activate` · `GET/POST/PUT/DELETE /api/admin/departments|groups（?eventId=）` · `POST /api/admin/import/csv（?eventId=）` · `GET/POST /api/admin/projects（?eventId=）` · `POST /api/admin/projects/:id/revoke|restore|archive` · `DELETE /api/admin/projects/:id（彻底删除已归档）` · `GET /api/admin/ports` · `GET /api/admin/deploys` · `POST /api/admin/deploys/:id/start|stop|restart` · `GET /api/admin/meta`
+`POST /api/admin/login` · `GET/POST/PUT/DELETE /api/admin/events` · `POST /api/admin/events/:id/activate` · `GET/POST/PUT/DELETE /api/admin/departments|groups（?eventId=）` · `POST /api/admin/import/csv（?eventId=）` · `GET/POST /api/admin/projects（?eventId=）` · `POST /api/admin/projects/:id/revoke|restore|archive` · `DELETE /api/admin/projects/:id（彻底删除已归档）` · `GET/POST /api/admin/register-token（本期注册令牌签发/轮换）` · `GET /api/admin/ports` · `GET /api/admin/deploys` · `POST /api/admin/deploys/:id/start|stop|restart` · `GET /api/admin/meta`
 
-上报错误码：`INVALID_KEY`(404) / `KEY_REVOKED`(403) / `RATE_LIMITED`(429) / `INVALID_STAGE`(400) / `STAGE_OUT_OF_ORDER`·`STAGE_ALREADY_DONE`(409)。上报可携带 `evidence` 对象；「上线部署」上报时服务端会主动探测项目端口并记录探活结果。
+上报错误码：`INVALID_KEY`(404) / `KEY_REVOKED`(403) / `RATE_LIMITED`(429) / `INVALID_STAGE`(400) / `STAGE_OUT_OF_ORDER`·`STAGE_ALREADY_DONE`(409)；loop 错误码：`LOOP_NOT_ALLOWED`(409)。上报可携带 `evidence` 对象；「上线部署」上报时服务端会主动探测项目端口并记录探活结果。
 
 ## 自动部署
 
@@ -186,7 +189,7 @@ Agent 执行: node report.js --deploy [--dir dist] [--type node|static] [--start
 
 ## 监管规则（服务端强制）
 
-- 节点只能按 7 节点顺序单调前进，禁跳节点、禁回退、禁重复；
-- 每项目上报间隔 ≥ 10 秒（含被拒请求）；
+- 节点只能按 8 节点顺序单调前进，禁跳节点、禁回退、禁重复；
+- 每项目成功上报间隔 ≥ 10 秒（被拒请求不消耗限频窗口）；
 - accesskey 吊销后立即拒绝上报；
 - 所有上报写入 `reports` 审计表（IP、时间、拒绝原因）。
