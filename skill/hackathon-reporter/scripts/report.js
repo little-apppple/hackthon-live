@@ -61,7 +61,7 @@ const STAGE_GUIDE = {
     name: '需求分析',
     done: '用户确认的 PRD 落盘（docs/prd.md），产品逻辑闭环：每个输入/输出都有来源、每条流程都能跑通',
     tips: [
-      '先请用户亲笔写需求——不要替用户编需求',
+      '已装 superpowers：走 brainstorming 硬门禁——设计获用户批准前禁写任何代码；未装：深搜产出模板给用户填 + grill-me 追问',
       '按项目名深度搜索相关产品/同类实现，产出需求模板给用户参考填写',
       '用 grill-me 方式一次一问补盲点；不确定能否获取的数据/接口先验证再写进 PRD，禁止假设',
       'PRD 必须形成闭环：用户从哪来 → 做什么 → 数据从哪来 → 结果到哪去，断链即打回',
@@ -86,13 +86,13 @@ const STAGE_GUIDE = {
   coding: {
     name: '代码开发',
     done: '核心功能全部完成、可运行',
-    tips: ['服务必须监听 process.env.PORT（自动部署靠它注入端口）', '本地开发可回退默认端口'],
+    tips: ['已装 superpowers：executing-plans 按任务清单 TDD（先看失败再实现），复杂任务子代理并行；未装：关键路径 TDD', '服务必须监听 process.env.PORT（自动部署靠它注入端口）', '本地开发可回退默认端口'],
     cmd: 'node report.js --stage coding --message "一句话成果"',
   },
   testing: {
     name: '本地测试',
     done: '核心流程自测通过、无明显 bug',
-    tips: ['直接编写 hackathon.config.json 里 verify.api / verify.e2e 指向的测试脚本——这就是验收要用的', '测试覆盖演示主线即可'],
+    tips: ['已装 superpowers：requesting/receiving-code-review 全新上下文独立评审，P0/P1 清零；未装：自检循环 ≤3 轮 + 新上下文交叉 review', '直接编写 hackathon.config.json 里 verify.api / verify.e2e 指向的测试脚本——这就是验收要用的', '测试覆盖演示主线即可'],
     cmd: 'node report.js --stage testing --message "一句话成果"',
   },
   deployment: {
@@ -543,7 +543,36 @@ async function runDoctor(cfg, configBroken) {
   else if (ignored === false) fail('.gitignore 未忽略 hackathon.config.json', fixHint);
   else warn('无法确认 hackathon.config.json 是否被 git 忽略', fixHint);
 
-  // 8. 同包的 vibecoding skill
+  // 8. superpowers（可选工作流组件）：已装用其技能承载 SDD+TDD 门禁，未装按同等门禁手动执行——标准不降
+  let superpowers = false;
+  const spMarkers = ['superpowers'];
+  const scanSuperpowers = (dir, depth) => {
+    if (superpowers || depth > 4) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      if (spMarkers.includes(e.name)) {
+        superpowers = true;
+        return;
+      }
+      scanSuperpowers(path.join(dir, e.name), depth + 1);
+    }
+  };
+  for (const base of ['.claude/plugins', '.claude/skills']) {
+    scanSuperpowers(path.join(os.homedir(), ...base.split('/')), 0);
+  }
+  if (superpowers) {
+    ok('检测到 superpowers（各节点按 SDD 硬门禁执行：brainstorming/TDD/独立评审）');
+  } else {
+    rows.push('  · 未检测到 superpowers（可选组件）——SDD+TDD 门禁不降级：按同等门禁手动执行，八节点上报不受影响');
+  }
+
+  // 9. 同包的 vibecoding skill
   const setupJs = path.join(__dirname, '..', '..', 'vibecoding-workflow', 'scripts', 'setup.js');
   if (fs.existsSync(setupJs)) {
     rows.push(`  · 检测到 vibecoding-workflow skill：node ${path.relative(process.cwd(), setupJs).split(path.sep).join('/')} 可生成 CLAUDE.md/AGENTS.md 并做完整依赖检测`);
