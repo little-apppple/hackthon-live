@@ -45,16 +45,32 @@ function has(cmd) {
 }
 function rel(p) { return path.relative(PROJECT, p).split(path.sep).join('/'); }
 
+function renderTemplate() {
+  let content = fs.readFileSync(TEMPLATE, 'utf8');
+  const rep = reporterAvailable();
+  return content.replace(/\{\{REPORTER_PATH\}\}/g, rep ? rel(rep) : '<skill目录>/hackathon-reporter/scripts/report.js');
+}
+
+// 已存在文档与当前模板比对：只看存在性会让旧版生成的项目静默停留在旧纪律
+function docsMatchTemplate(filename) {
+  try {
+    return fs.readFileSync(path.join(PROJECT, filename), 'utf8') === renderTemplate();
+  } catch {
+    return false;
+  }
+}
+
 function writeDoc(filename) {
   const target = path.join(PROJECT, filename);
   if (fs.existsSync(target) && !FLAG_FORCE) {
-    note(`${filename} 已存在，跳过（--force 可覆盖）`);
+    if (docsMatchTemplate(filename)) {
+      note(`${filename} 已存在且与当前模板一致，跳过（--force 可覆盖）`);
+    } else {
+      fail(`${filename} 与当前模板不一致（可能为旧版生成）`, '运行 --force 覆盖为新版，或人工合并你的自定义内容');
+    }
     return false;
   }
-  let content = fs.readFileSync(TEMPLATE, 'utf8');
-  const rep = reporterAvailable();
-  content = content.replace(/\{\{REPORTER_PATH\}\}/g, rep ? rel(rep) : '<skill目录>/hackathon-reporter/scripts/report.js');
-  fs.writeFileSync(target, content, 'utf8');
+  fs.writeFileSync(target, renderTemplate(), 'utf8');
   console.log(`  + 已生成 ${filename}${FLAG_FORCE ? '（覆盖）' : ''}`);
   fixed++;
   return true;
@@ -193,7 +209,9 @@ if (fs.existsSync(hackathonCfg)) {
 console.log('');
 if (FLAG_CHECK) {
   for (const f of ['CLAUDE.md', 'AGENTS.md']) {
-    fs.existsSync(path.join(PROJECT, f)) ? pass(`${f} 已存在`) : fail(`${f} 缺失`, '默认运行本脚本即可自动生成');
+    if (!fs.existsSync(path.join(PROJECT, f))) fail(`${f} 缺失`, '默认运行本脚本即可自动生成');
+    else if (docsMatchTemplate(f)) pass(`${f} 已存在且与当前模板一致`);
+    else fail(`${f} 与当前模板不一致（可能为旧版生成）`, '运行 --force 覆盖为新版，或人工合并自定义内容');
   }
 } else {
   console.log('── 文档生成 ──');

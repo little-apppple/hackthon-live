@@ -83,6 +83,26 @@ setup.js 对以上依赖的检测是**门控的**：仅当项目 verify 命令�
 
 setup 自动检测：Node ≥18、git、项目依赖、hackathon-reporter skill（本 skill 的上报依赖）、`hackathon.config.json`（参赛必需，缺失时提示向管理员索取）、CLAUDE.md/AGENTS.md。
 
+## 工作流自适应（superpowers 可选组件）
+
+先判定环境：Agent 会话中能调用 superpowers 的技能（brainstorming / test-driven-development / requesting-code-review 等），或 `report.js --doctor` 报告检测到 superpowers，即视为已安装。
+
+- **已安装**：各节点按 superpowers 的 SDD 硬门禁执行内层工作——brainstorming（spec 获用户批准前禁写码）→ writing-plans → TDD/subagent 并行 → receiving-code-review（全新上下文，P0/P1 清零）→ verification-before-completion。**上报框架不变**，映射关系：
+  | superpowers 门禁 | 上报节点 |
+  |---|---|
+  | brainstorming（spec 批准） | 1 requirements |
+  | writing-plans + 接口契约 | 2 design |
+  | （无原生环节，保留） | 3 prototype（用户确认） |
+  | executing-plans + TDD + subagent | 4 coding |
+  | receiving-code-review + E2E | 5 testing |
+  | finishing-a-development-branch | 6 deployment |
+  | verification-before-completion | 7 acceptance（--verify 即其机器化） |
+  | （无对应，比赛特有） | 8 submission（用户终审） |
+
+  两处「翻译」：superpowers 认为 merge 即完成，本流程完成 = 线上可访问，merge 后仍要 `--deploy`；spec→plan 无缝但写码前必须过 3 节点的原型确认门禁。
+- **未安装**：按**同等的 SDD+TDD 门禁手动执行**——规格先行获批、关键路径先看测试失败、新上下文交叉评审 P0/P1 清零，一项不少；只是不用 superpowers 的技能脚本/子代理机制。执行器可缺，标准不降。
+- 一线强模型建议即使装了 superpowers 也可裁剪为三件套（brainstorming/TDD/code-review，对应 1/4/5 节点内层），其余节点内层照旧——内层换档，外层（八节点 + 上报）永不换。
+
 ## 知识沉淀（收尾复盘）
 
 - 约束与偏好 → CLAUDE.md / AGENTS.md；术语 → CONTEXT.md；一次性规格 → docs/specs/、docs/plans/；可复用方法论 → skill。各归其位，不写错层。
