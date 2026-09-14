@@ -4,6 +4,7 @@ const db = require('../db');
 const config = require('../config');
 const deployer = require('../deployer');
 const { notifyRefresh } = require('../sse');
+const { DEPLOY_STAGE_INDEX } = require('../stages');
 const router = express.Router();
 
 const aw = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -43,6 +44,9 @@ router.post(
     const start = String(req.query.start || '').trim() || (type === 'node' ? 'npm start' : '');
     const install = req.query.install === '1';
     const dir = String(req.query.dir || '');
+    if (deployer.resolveAppDir(project, dir) === null) {
+      return res.status(400).json({ ok: false, code: 'INVALID_DIR', error: `dir 非法：必须位于应用目录内部（收到 "${dir}"）` });
+    }
 
     const result = await deployer.deployProject(project, { type, start, install, dir }, req.body);
     if (!result.ok) {
@@ -54,19 +58,19 @@ router.post(
     const fresh = db.prepare('SELECT * FROM projects WHERE id = ?').get(project.id);
     let stageReported = false;
     let note = null;
-    if (fresh.completed_stages === 5) {
+    if (fresh.completed_stages === DEPLOY_STAGE_INDEX - 1) {
       const evidence = JSON.stringify({ deploy: 'auto', probe: result.probe, type }).slice(0, 4000);
       db.prepare(
-        `UPDATE projects SET completed_stages = 6, status = 'deployed',
+        `UPDATE projects SET completed_stages = ${DEPLOY_STAGE_INDEX}, status = 'deployed',
             last_report_at = datetime('now','localtime'), updated_at = datetime('now','localtime')
-          WHERE id = ?`
+          WHERE id = ? AND revoked = 0 AND archived = 0`
       ).run(project.id);
       db.prepare(
         'INSERT INTO reports (project_id, stage, ok, reject_code, message, ip, evidence) VALUES (?, ?, 1, NULL, ?, ?, ?)'
       ).run(project.id, 'deployment', '自动部署成功（服务端探活通过）', req.ip || '', evidence);
       stageReported = true;
-    } else if (fresh.completed_stages < 5) {
-      note = `部署成功但未自动上报「上线部署」：流程尚未进行到该节点（当前 ${fresh.completed_stages}/6），请先按顺序完成前置节点`;
+    } else if (fresh.completed_stages < DEPLOY_STAGE_INDEX - 1) {
+      note = `部署成功但未自动上报「上线部署」：流程尚未进行到该节点（当前 ${fresh.completed_stages}/8，部署为第 6 节点），请先按顺序完成前置节点`;
     } else {
       note = '重新部署完成（部署节点此前已完成，进度不变）';
     }

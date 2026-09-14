@@ -2,7 +2,7 @@
 const db = require('./db');
 const config = require('./config');
 const { getActiveEvent } = require('./events');
-const { STAGES, progressPercent } = require('./stages');
+const { STAGES, progressPercent, DEPLOY_STAGE_INDEX, DONE_STAGE_INDEX } = require('./stages');
 
 // 按活动构建大屏快照；eventId 缺省为当前活跃活动
 function buildSnapshot(eventId) {
@@ -16,8 +16,8 @@ function buildSnapshot(eventId) {
       `SELECT COUNT(DISTINCT d.id) AS departments,
               COUNT(DISTINCT g.id) AS groups,
               COUNT(p.id) AS projects,
-              COALESCE(SUM(CASE WHEN p.completed_stages >= 6 THEN 1 ELSE 0 END), 0) AS deployed,
-              COALESCE(SUM(CASE WHEN p.completed_stages >= 7 THEN 1 ELSE 0 END), 0) AS done,
+              COALESCE(SUM(CASE WHEN p.completed_stages >= ${DEPLOY_STAGE_INDEX} THEN 1 ELSE 0 END), 0) AS deployed,
+              COALESCE(SUM(CASE WHEN p.completed_stages >= ${DONE_STAGE_INDEX} THEN 1 ELSE 0 END), 0) AS done,
               COALESCE(AVG(CASE WHEN p.archived = 0 THEN p.completed_stages END), 0) AS avg_stages
          FROM departments d
          LEFT JOIN groups g ON g.department_id = d.id

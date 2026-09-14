@@ -117,14 +117,20 @@ router.post('/report', aw(async (req, res) => {
   }
   const evidenceJson = evidence ? JSON.stringify(evidence).slice(0, 4000) : null;
 
-  // 通过全部校验：推进节点
+  // 通过全部校验：推进节点（带守卫：校验后到写入前可能被吊销/归档/loop）
   const newStatus = deriveStatus(st.index, true);
-  db.prepare(
-    `UPDATE projects
-        SET completed_stages = ?, status = ?, last_report_at = datetime('now','localtime'),
-            updated_at = datetime('now','localtime')
-      WHERE id = ?`
-  ).run(st.index, newStatus, project.id);
+  const upd = db
+    .prepare(
+      `UPDATE projects
+          SET completed_stages = ?, status = ?, last_report_at = datetime('now','localtime'),
+              updated_at = datetime('now','localtime')
+        WHERE id = ? AND revoked = 0 AND archived = 0`
+    )
+    .run(st.index, newStatus, project.id);
+  if (upd.changes === 0) {
+    audit(project.id, st.id, 0, 'INVALID_KEY', msg, ip);
+    return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: '项目状态已变化（可能被吊销/归档/迭代），请重新查询' });
+  }
   audit(project.id, st.id, 1, null, msg, ip, evidenceJson);
 
   const progress = progressPercent(st.index);
@@ -324,14 +330,22 @@ router.post('/loop', aw(async (req, res) => {
       nextStage: stageByIndex(project.completed_stages + 1),
     });
   }
+  const wasSubmitted = project.completed_stages >= STAGES.length;
   const newLoop = project.loop_count + 1;
   db.prepare(
     `UPDATE projects
         SET loop_count = ?, completed_stages = 0, status = 'active',
             updated_at = datetime('now','localtime')
-      WHERE id = ?`
+      WHERE id = ? AND revoked = 0 AND archived = 0`
   ).run(newLoop, project.id);
-  audit(project.id, 'loop', 1, null, `开启第 ${newLoop} 轮迭代（上一轮完成 ${project.completed_stages}/${STAGES.length}）`, ip);
+  audit(
+    project.id,
+    'loop',
+    1,
+    null,
+    `开启第 ${newLoop} 轮迭代（上一轮完成 ${project.completed_stages}/${STAGES.length}）${wasSubmitted ? '；⚠ 解冻已提交作品，需重新提交' : ''}`,
+    ip
+  );
   notifyRefresh('loop');
 
   res.json({
@@ -359,6 +373,7 @@ router.get('/report/status', (req, res) => {
     revoked: !!project.revoked,
     projectName: project.name,
     port: project.port,
+    loopCount: project.loop_count || 1,
     completedStages: project.completed_stages,
     progress: progressPercent(project.completed_stages),
     nextStage: next,

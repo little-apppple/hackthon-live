@@ -34,11 +34,30 @@ function resolveEventId(req) {
 }
 
 // ---------- 认证 ----------
+// 登录限频：每 IP 5 次/分钟（内存计数，防公网爆破默认管理密码）
+const loginAttempts = new Map(); // ip -> epoch ms 数组
+setInterval(() => {
+  const cutoff = Date.now() - 60 * 1000;
+  for (const [ip, arr] of loginAttempts) {
+    if (!arr.some((t) => t >= cutoff)) loginAttempts.delete(ip);
+  }
+}, 60 * 1000).unref();
+
 router.post('/login', (req, res) => {
+  const ip = req.ip || '';
+  const now = Date.now();
+  const arr = (loginAttempts.get(ip) || []).filter((t) => now - t < 60 * 1000);
+  if (arr.length >= 5) {
+    return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: '尝试过于频繁，请 1 分钟后再试' });
+  }
+  arr.push(now);
+  loginAttempts.set(ip, arr);
+
   const { password } = req.body || {};
   if (!password || password !== config.adminPassword) {
     return res.status(401).json({ ok: false, code: 'BAD_PASSWORD', error: '管理密码错误' });
   }
+  loginAttempts.delete(ip); // 成功后清零
   createSession(res);
   res.json({ ok: true });
 });
@@ -216,10 +235,15 @@ router.put('/groups/:id', (req, res) => {
 });
 
 router.delete('/groups/:id', (req, res) => {
+  // 归档项目的 group_id 外键仍然生效：只查未归档会漏报，删除将触发 500
   const p = db
-    .prepare('SELECT COUNT(*) AS n FROM projects WHERE group_id = ? AND archived = 0')
+    .prepare('SELECT COUNT(*) AS n FROM projects WHERE group_id = ?')
     .get(req.params.id);
-  if (p.n > 0) return res.status(409).json({ ok: false, error: '该小组下仍有项目，请先归档项目' });
+  if (p.n > 0) {
+    return res
+      .status(409)
+      .json({ ok: false, error: '该小组下仍有项目（含已归档），请先归档再彻底删除项目后重试' });
+  }
   const info = db.prepare('DELETE FROM groups WHERE id = ?').run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ ok: false, error: '小组不存在' });
   notifyRefresh('roster');
@@ -342,14 +366,15 @@ router.post('/projects', aw(async (req, res) => {
   }
 }));
 
-router.post('/projects/:id/revoke', (req, res) => {
+router.post('/projects/:id/revoke', aw(async (req, res) => {
   const info = db
     .prepare("UPDATE projects SET revoked = 1, updated_at = datetime('now','localtime') WHERE id = ? AND archived = 0")
     .run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ ok: false, error: '项目不存在或已归档' });
+  await deployer.stopProject(Number(req.params.id)).catch(() => {}); // 吊销即停服：不允许被禁项目继续对外服务
   notifyRefresh('revoke');
   res.json({ ok: true });
-});
+}));
 
 router.post('/projects/:id/restore', (req, res) => {
   const info = db

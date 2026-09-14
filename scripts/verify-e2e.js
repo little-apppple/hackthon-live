@@ -1,7 +1,7 @@
 'use strict';
 // 验收自动化端到端测试（独立测试服务实例，不污染主库）：
 //   node scripts/verify-e2e.js
-// 覆盖：探活/接口/E2E 全通过 → 自动验收 7/7；E2E 失败 → 不上报验收退出码 3。
+// 覆盖：探活/接口/E2E 全通过 → 自动验收 7/8；E2E 失败 → 不上报验收退出码 3。
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -155,7 +155,7 @@ async function reportStage(configFile, stage) {
     const v1 = await runCli(['--config', 'config-pass.json', '--verify'], TMP);
     check('--verify 全部通过（退出码 0）', v1 === 0, `实际 ${v1}`);
     const s1 = await (await fetch(BASE + `/api/report/status?accessKey=${proj1.accessKey}`)).json();
-    check('自动验收后 7/7（100%）', s1.completedStages === 7 && s1.progress === 100, JSON.stringify(s1));
+    check('自动验收后 7/8（88%，待用户最终提交）', s1.completedStages === 7 && s1.progress === 88, JSON.stringify(s1));
     const v1again = await runCli(['--config', 'config-pass.json', '--verify'], TMP);
     check('重复 --verify 幂等（提示已完成）', v1again === 0);
 
@@ -168,7 +168,7 @@ async function reportStage(configFile, stage) {
     const v2 = await runCli(['--config', 'config-fail.json', '--verify'], TMP);
     check('E2E 失败时 --verify 退出码 3', v2 === 3, `实际 ${v2}`);
     const s2 = await (await fetch(BASE + `/api/report/status?accessKey=${proj2.accessKey}`)).json();
-    check('验收未上报（停在 6/7）', s2.completedStages === 6 && s2.progress === 86, JSON.stringify(s2));
+    check('验收未上报（停在 6/8）', s2.completedStages === 6 && s2.progress === 75, JSON.stringify(s2));
 
     // 7. 部署前置守卫：新项目未部署时 --verify 应失败退出码 1
     console.log('\n-- 前置守卫 --');

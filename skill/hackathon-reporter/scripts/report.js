@@ -610,11 +610,26 @@ async function cmdDoctor(args) {
 // ---------- 迭代与最终提交 ----------
 
 async function confirm(question) {
+  // 非交互环境（管道/CI/无 stdin）：既不能静默取消也不能挂起——明确报错退出，提示用 --yes
+  if (!process.stdin.isTTY || process.stdin.readableEnded) {
+    console.error(`\n✗ 需要交互确认（${question.trim()}）`);
+    console.error('  当前运行在非交互环境：确认操作无误后可加 --yes 跳过确认。');
+    process.exit(2);
+  }
   const readline = require('readline/promises');
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answered = new Promise((resolve, reject) => {
+    rl.on('close', () => reject(new Error('STDIN_CLOSED')));
+  });
   try {
-    const a = (await rl.question(question)).trim().toLowerCase();
+    const a = await Promise.race([rl.question(question).then((v) => String(v).trim().toLowerCase()), answered]);
     return a === 'y' || a === 'yes';
+  } catch (e) {
+    if (e?.message === 'STDIN_CLOSED') {
+      console.error('\n✗ 输入流已关闭，视为取消。');
+      return false;
+    }
+    throw e;
   } finally {
     rl.close();
   }
@@ -666,6 +681,10 @@ async function cmdSubmit(args, cfg) {
   if (st.revoked) {
     console.error('✗ 该 accessKey 已被吊销，请联系赛事管理员。');
     process.exit(1);
+  }
+  if (st.completedStages >= TOTAL_STAGES) {
+    console.log('✓ 该项目已完成最终提交，当前线上版本即为参赛评分版本。如需修改请 --loop 开新一轮。');
+    process.exit(0);
   }
   if (st.completedStages < TOTAL_STAGES - 1 || !st.nextStage || st.nextStage.id !== 'submission') {
     console.error('✗ 还不能最终提交：请先完成「线上验收」（7/8）。');
@@ -807,7 +826,7 @@ async function cmdDeploy(args, cfg) {
     await new Promise((resolve, reject) => {
       const t = spawn(
         'tar',
-        ['-czf', '-', '--exclude', 'node_modules', '--exclude', '.git', '--exclude', 'hackathon.config.json', '.'],
+        ['-czf', '-', '--exclude', 'node_modules', '--exclude', '.git', '--exclude', 'hackathon.config.json', '--exclude', '.env', '--exclude', '.env.*', '.'],
         {
           cwd: absDir,
           stdio: ['ignore', 'pipe', 'inherit'],
@@ -842,7 +861,7 @@ async function cmdDeploy(args, cfg) {
       console.log(`✓ 部署成功: ${data.deployUrl}`);
       if (data.stageReported) {
         console.log('  已自动上报「上线部署」，大屏链接已开放访问。');
-        console.log('  进度: 6/7（86%）  下一节点: 7. 线上验收 (acceptance)');
+        console.log(`  进度: 6/${TOTAL_STAGES}（75%）  下一节点: 7. 线上验收 (acceptance)`);
         console.log('  下一步: 验收时执行 node report.js --verify');
       } else if (data.note) {
         console.log(`  ${data.note}`);
@@ -908,7 +927,7 @@ async function cmdVerify(args, cfg) {
     process.exit(0);
   }
   if (status.completedStages < 6) {
-    console.error(`✗ 尚未完成「上线部署」节点（当前 ${status.completedStages}/6），先部署并上报 deployment 后再验收。`);
+    console.error(`✗ 尚未完成「上线部署」节点（当前 ${status.completedStages}/${TOTAL_STAGES}，部署为第 6 节点），先部署并上报 deployment 后再验收。`);
     process.exit(1);
   }
 

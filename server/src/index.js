@@ -37,7 +37,9 @@ app.use((req, res) => res.status(404).json({ ok: false, error: 'Not Found' }));
 app.use((err, req, res, next) => {
   console.error('[server]', err);
   if (res.headersSent) return next(err);
-  res.status(500).json({ ok: false, error: err.message || 'Internal Error' });
+  // 保留 body-parser 等中间件给出的 4xx 状态码，未知错误才落 500
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({ ok: false, error: err.message || 'Internal Error' });
 });
 
 app.listen(config.port, () => {

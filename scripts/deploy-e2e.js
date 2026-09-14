@@ -151,7 +151,7 @@ async function tryFetch(url) {
     const d1 = await runCli(['--config', 'config1.json', '--deploy'], TMP);
     check('--deploy 退出码 0', d1 === 0);
     const s1 = await (await fetch(BASE + `/api/report/status?accessKey=${proj1.accessKey}`)).json();
-    check('部署节点自动上报（6/7）', s1.completedStages === 6 && s1.progress === 86, JSON.stringify(s1));
+    check('部署节点自动上报（6/8）', s1.completedStages === 6 && s1.progress === 75, JSON.stringify(s1));
     const hit1 = await tryFetch(`http://localhost:${proj1.port}`);
     check('部署的应用可访问', hit1.ok && hit1.text === 'hello-deploy', JSON.stringify(hit1));
 

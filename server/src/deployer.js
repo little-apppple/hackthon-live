@@ -90,14 +90,28 @@ function logTail(projectId, bytes = 4096) {
 
 // ---------- 启动器 ----------
 
+// 把 meta.dir 解析到 app/ 内部：越界（..、绝对路径）一律拒绝——
+// 否则预留端口会变成任意目录的公开文件服务器（可读到含 accessKey 的数据库）。
+// 空字符串 = app 根目录本身，是合法默认值。
+function resolveAppDir(project, dir) {
+  const base = path.join(appRoot(project.id), 'app');
+  const resolved = path.resolve(base, String(dir || ''));
+  const rel = path.relative(base, resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    appendLog(project.id, `[deployer] dir 越界被拒绝: ${dir}\n`);
+    return null;
+  }
+  return resolved;
+}
+
 function childEnv(project) {
   const extraPath = config.deployPathPrepend ? config.deployPathPrepend + ':' : '';
   return { ...process.env, PORT: String(project.port), HOST: '0.0.0.0', PATH: extraPath + process.env.PATH };
 }
 
 function startNodeApp(project, meta, state) {
-  const dir = path.join(appRoot(project.id), 'app', meta.dir || '');
-  if (!fs.existsSync(dir)) {
+  const dir = resolveAppDir(project, meta.dir);
+  if (!dir || !fs.existsSync(dir)) {
     state.status = 'failed';
     return;
   }
@@ -152,9 +166,12 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
+// 静态托管拒绝名单：这些文件即使被打进产物也不对外提供
+const STATIC_DENY = /(^|[/\\])(\.env(\..+)?|hackathon\.config\.json|[^/\\]*\.(pem|key))$/i;
+
 function startStaticServer(project, meta, state) {
-  const root = path.join(appRoot(project.id), 'app', meta.dir || '');
-  if (!fs.existsSync(root)) {
+  const root = resolveAppDir(project, meta.dir);
+  if (!root || !fs.existsSync(root)) {
     state.status = 'failed';
     return;
   }
@@ -162,7 +179,7 @@ function startStaticServer(project, meta, state) {
     try {
       let p = decodeURIComponent((req.url || '/').split('?')[0]);
       let file = path.normalize(path.join(root, p));
-      if (!file.startsWith(path.normalize(root))) {
+      if (!file.startsWith(path.normalize(root)) || STATIC_DENY.test(file)) {
         res.writeHead(403);
         return res.end('Forbidden');
       }
@@ -277,6 +294,11 @@ async function deployProject(project, opts, archiveBuffer) {
     }
   }
   fs.mkdirSync(appDir, { recursive: true });
+
+  // dir 越界在解包前就拒绝：快速失败并给出明确错误（启动期 resolveAppDir 再兜底一次）
+  if (resolveAppDir(project, opts.dir) === null) {
+    return { ok: false, error: `dir 非法：必须位于应用目录内部（收到 "${opts.dir}"）` };
+  }
 
   // 2. 写包解压（tar 相对路径 + cwd，规避 Windows 盘符路径被 GNU tar 当作远程主机）
   const tmp = path.join(root, 'upload.bin');
@@ -403,7 +425,7 @@ function recoverOnBoot() {
           `SELECT p.* FROM projects p
              JOIN groups g ON g.id = p.group_id
              JOIN departments d ON d.id = g.department_id
-            WHERE p.id = ? AND d.event_id = ? AND p.archived = 0`
+            WHERE p.id = ? AND d.event_id = ? AND p.archived = 0 AND p.revoked = 0`
         )
         .get(Number(name), active.id);
       if (!project) continue;
@@ -432,4 +454,4 @@ function recoverOnBoot() {
   }
 }
 
-module.exports = { deployProject, restartProject, stopProject, startProject, getStatus, listStatus, recoverOnBoot, logTail };
+module.exports = { deployProject, restartProject, stopProject, startProject, getStatus, listStatus, recoverOnBoot, logTail, resolveAppDir };
