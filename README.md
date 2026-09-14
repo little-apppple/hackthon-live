@@ -60,9 +60,11 @@ npm start              # 启动服务（默认 http://localhost:3000）
 辅助脚本：
 
 ```bash
+npm test               # 回归闸门：一键跑完下面全部套件（smoke + 三套 E2E），任一失败即退出非 0
 npm run demo           # 生成各阶段混合的演示项目数据（开发/演示用）
 npm run smoke          # 端到端冒烟测试（104 项断言：认证/CSV/上报强约束/探活/吊销/端口复用/审计/活动隔离/端口区间/自助注册/loop 迭代/最终提交）
 npm run verify:e2e     # 验收自动化端到端测试（通过/失败/未部署三条路径）
+npm run skill:e2e      # 参赛技能包全旅程端到端测试（打包→解压→doctor→自助注册→八节点→部署→验收→loop→终审）
 npm run deploy:e2e     # 自动部署端到端测试（node/static/自动上报/重启停止/未到节点）
 ```
 
