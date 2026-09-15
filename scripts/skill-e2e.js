@@ -147,9 +147,52 @@ function writeFixture() {
     const init2 = await runSkill(['--init', '--force', '--department', 'E2E 部门', '--group', 'E2E 小组', '--project', '技能包全链路用例']);
     const cfg2 = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     check('幂等：重复注册返回同一密钥', init2.code === 0 && cfg2.accessKey === key1 && init2.out.includes('幂等'));
+    check('客户端标识持久化且 --force 重跑不变', /^cli_[0-9a-f]{32}$/.test(cfg.clientId || '') && cfg2.clientId === cfg.clientId, `first=${cfg.clientId} second=${cfg2.clientId}`);
+
+    // 重名队伍（另一个 clientId，同名同组同项目）必须被拒绝，不能互相覆盖
+    const rvDir = path.join(TMP, 'rival');
+    fs.mkdirSync(rvDir, { recursive: true });
+    fs.cpSync(path.join(PARTICIPANT, 'skill'), path.join(rvDir, 'skill'), { recursive: true });
+    const rv = await runSkill(['--init', '--department', 'E2E 部门', '--group', 'E2E 小组', '--project', '技能包全链路用例'], { cwd: rvDir });
+    check('重名队伍（不同 clientId）注册被拒 409 NAME_TAKEN', rv.code === 1 && /NAME_TAKEN|已被其他客户端注册/.test(rv.out), rv.out.slice(-200));
+    check('重名队伍未拿到他人密钥', !fs.existsSync(path.join(rvDir, 'hackathon.config.json')));
 
     const doc2 = await runSkill(['--doctor']);
     check('--doctor 接入后检测通过（退出码 0）', doc2.code === 0, doc2.out.slice(-300));
+    check('--doctor 识别客户端绑定', doc2.out.includes('客户端标识已绑定'));
+
+    // ── 4b. superpowers 桥接（可选执行器：已装用其技能承载，未装同等门禁手动执行）──
+    console.log('\n-- superpowers 桥接 --');
+    const profileEnv = (home) => ({ USERPROFILE: home, HOME: home });
+    const noSpHome = path.join(TMP, 'profile-nosp');
+    fs.mkdirSync(noSpHome, { recursive: true });
+    const dNoSp = await runSkill(['--doctor'], { env: profileEnv(noSpHome) });
+    check('未装：探测报告未检测到 superpowers', dNoSp.out.includes('未检测到 superpowers'));
+    check('未装：明确 SDD+TDD 门禁不降级、按同等门禁手动执行', dNoSp.out.includes('SDD+TDD 门禁不降级') && dNoSp.out.includes('按同等门禁手动执行'));
+
+    const spHome = path.join(TMP, 'profile-sp');
+    fs.mkdirSync(path.join(spHome, '.claude', 'plugins', 'market', 'superpowers'), { recursive: true });
+    const dSp = await runSkill(['--doctor'], { env: profileEnv(spHome) });
+    check('已装：探测报告检测到 superpowers', dSp.out.includes('检测到 superpowers'));
+    check('已装：提示按 SDD 硬门禁执行', /SDD/.test(dSp.out) && /brainstorming/.test(dSp.out));
+
+    const nextBridge = await runSkill(['--next']);
+    check(
+      '需求节点工作项含双模式指引（brainstorming ↔ 模板+grill-me）',
+      nextBridge.out.includes('已装 superpowers') && nextBridge.out.includes('未装') && nextBridge.out.includes('brainstorming'),
+      nextBridge.out.slice(-260)
+    );
+
+    // 记忆文件桥接：vibecoding skill 生成的项目记忆必须强制 SDD+TDD
+    const vcSetup = path.join(PARTICIPANT, 'skill', 'vibecoding-workflow', 'scripts', 'setup.js');
+    spawnSync(process.execPath, [vcSetup], { cwd: PARTICIPANT, encoding: 'utf8' });
+    const claudeMd = fs.existsSync(path.join(PARTICIPANT, 'CLAUDE.md')) ? fs.readFileSync(path.join(PARTICIPANT, 'CLAUDE.md'), 'utf8') : '';
+    check(
+      '项目记忆强制 SDD+TDD 且写明执行器策略',
+      /SDD 强制/.test(claudeMd) && /TDD 强制/.test(claudeMd) && /执行器可缺，标准不降/.test(claudeMd),
+      `len=${claudeMd.length}`
+    );
+    check('八卡点表含最终提交（用户终审）', /submission/.test(claudeMd) && /--submit/.test(claudeMd));
 
     // ── 5. 工作循环：--next 与节点上报 ──
     console.log('\n-- 工作循环（第一轮）--');
@@ -160,6 +203,14 @@ function writeFixture() {
     for (const st of ['requirements', 'design', 'prototype', 'coding', 'testing']) {
       const r = await runSkill(['--stage', st, '--message', 'skill-e2e']);
       check(`上报 ${st}`, r.code === 0 && /已记录|进度/.test(r.out), r.out.slice(-160));
+      if (st === 'coding') {
+        const nextTesting = await runSkill(['--next']);
+        check(
+          '测试节点工作项含评审双模式指引（独立评审 ↔ 自检+交叉 review）',
+          nextTesting.out.includes('requesting/receiving-code-review') && nextTesting.out.includes('未装'),
+          nextTesting.out.slice(-260)
+        );
+      }
     }
 
     // ── 6. --deploy 自动部署并自动上报 ──
@@ -178,6 +229,14 @@ function writeFixture() {
     check('--verify 全部通过（退出码 0）', ver.code === 0, ver.out.slice(-300));
     const st7 = await statusOf(key1);
     check('线上验收自动上报（7/8，88%，待终审）', st7.completedStages === 7 && st7.progress === 88 && st7.nextStage?.id === 'submission', JSON.stringify(st7));
+
+    // 终审硬门禁：--next 必须把「用户本人执行」的指引交给 Agent
+    const nextSubmit = await runSkill(['--next']);
+    check(
+      '7/8 时 --next 提示最终提交必须由用户本人执行',
+      nextSubmit.out.includes('必须由参赛用户本人执行') && nextSubmit.out.includes('--submit'),
+      nextSubmit.out.slice(-260)
+    );
 
     // ── 8. --loop 第二轮迭代 ──
     console.log('\n-- 迭代（loop）--');
