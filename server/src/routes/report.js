@@ -161,11 +161,11 @@ router.post('/report', aw(async (req, res) => {
   });
 }));
 
-// 自助注册（技能包 --init 注册模式）：幂等——同一当前活动内「部门/小组/项目名」
-// 只生成一次 accessKey，重复调用返回同一密钥（可安全重跑、可多处下发）。
-// 安全模型：注册需携带本期活动的注册令牌（管理员经 /api/admin/register-token 签发、
-// 打包技能包时烘入 server.json），防止用公开大屏上的部门/小组/项目名推导任意 accessKey；
-// 每 IP 限频；成功注册写入审计。
+// 自助注册（技能包 --init 注册模式）：以**客户端标识 clientId** 为幂等键——
+// 同一 clientId 重复注册返回同一项目（与名称无关）；不同 clientId 撞上已绑定的
+// 部门/小组/项目名 → 409 NAME_TAKEN，避免重名队伍互相覆盖。
+// 另外仍要求携带本期活动注册令牌（管理员签发、打包时烘入 server.json）；每 IP 限频；成功注册写入审计。
+const CLIENT_ID_RE = /^cli_[0-9a-f]{32}$/;
 const registerAttempts = new Map(); // ip -> epoch ms 数组
 const loopLastAt = new Map(); // projectId -> epoch ms（loop 每项目 10s 窗口）
 setInterval(() => {
@@ -200,12 +200,16 @@ router.post('/register', aw(async (req, res) => {
   const groupName = norm(req.body?.group);
   const projectName = norm(req.body?.project);
   const description = String(req.body?.description ?? '').trim().slice(0, 200);
+  const clientId = String(req.body?.clientId ?? '').trim();
   if (!deptName || !groupName || !projectName) {
     return res.status(400).json({
       ok: false,
       code: 'INVALID_PARAMS',
       error: 'department / group / project 均不能为空（各限 50 字符内）',
     });
+  }
+  if (clientId && !CLIENT_ID_RE.test(clientId)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_CLIENT_ID', error: 'clientId 格式无效（应为 cli_ + 32 位十六进制）' });
   }
   const event = getActiveEvent();
   if (!verifyRegisterToken(event.id, req.body?.registerToken)) {
@@ -216,7 +220,23 @@ router.post('/register', aw(async (req, res) => {
     });
   }
 
-  const findProject = () =>
+  const NAME_TAKEN = () =>
+    Object.assign(new Error('NAME_TAKEN'), {
+      regCode: 'NAME_TAKEN',
+      payload: {
+        ok: false,
+        code: 'NAME_TAKEN',
+        error: `「${deptName} / ${groupName} / ${projectName}」已被其他客户端注册。如果这确实是你们队已注册的项目，请找回原接入配置（含 clientId）；否则更换项目名，或联系管理员解绑`,
+      },
+    });
+
+  const byClient = (cid) =>
+    cid
+      ? db
+          .prepare('SELECT * FROM projects WHERE event_id = ? AND client_id = ? AND archived = 0')
+          .get(event.id, cid)
+      : null;
+  const byName = () =>
     db
       .prepare(
         `SELECT p.* FROM projects p
@@ -226,8 +246,33 @@ router.post('/register', aw(async (req, res) => {
       )
       .get(event.id, deptName, groupName, projectName);
 
-  let project = findProject();
+  // 解析顺序：clientId 命中 → 名字命中（未绑定则认领 / 已绑定同一客户端则复用 / 他人占用则冲突）
+  const resolveExisting = () => {
+    const mine = byClient(clientId);
+    if (mine) return mine;
+    const named = byName();
+    if (!named) return null;
+    if (!named.client_id) {
+      if (clientId) {
+        db.prepare('UPDATE projects SET client_id = ?, updated_at = datetime(\'now\',\'localtime\') WHERE id = ? AND client_id IS NULL').run(clientId, named.id);
+        named.client_id = clientId;
+        audit(named.id, 'bind', 1, null, '存量项目认领客户端绑定', ip);
+      }
+      return named;
+    }
+    if (clientId && named.client_id === clientId) return named;
+    throw NAME_TAKEN();
+  };
+
+  let project = null;
   let createdNow = false;
+  let nameMismatch = null;
+  try {
+    project = resolveExisting();
+  } catch (e) {
+    if (e.regCode === 'NAME_TAKEN') return res.status(409).json(e.payload);
+    throw e;
+  }
   if (!project) {
     // 端口探测含异步 IO，放事务外；并发重入由事务内的二次查找兜底。
     // 开赛集中注册时并发请求会探到同一个空闲端口，端口唯一约束冲突时换端口重试（最多 3 次）。
@@ -243,19 +288,18 @@ router.post('/register', aw(async (req, res) => {
       }
       try {
         const tx = db.transaction(() => {
+          // 并发重入：事务内重新按 clientId / 名字解析，冲突直接拒绝
+          const existing = resolveExisting();
+          if (existing) return { project: existing, created: false };
           let dept = db.prepare('SELECT id FROM departments WHERE event_id = ? AND name = ?').get(event.id, deptName);
           if (!dept) db.prepare('INSERT INTO departments (event_id, name) VALUES (?, ?)').run(event.id, deptName);
           dept = db.prepare('SELECT id FROM departments WHERE event_id = ? AND name = ?').get(event.id, deptName);
           let group = db.prepare('SELECT id FROM groups WHERE department_id = ? AND name = ?').get(dept.id, groupName);
           if (!group) db.prepare('INSERT INTO groups (event_id, department_id, name) VALUES (?, ?, ?)').run(event.id, dept.id, groupName);
           group = db.prepare('SELECT id FROM groups WHERE department_id = ? AND name = ?').get(dept.id, groupName);
-          const again = db
-            .prepare('SELECT * FROM projects WHERE event_id = ? AND group_id = ? AND name = ? AND archived = 0')
-            .get(event.id, group.id, projectName);
-          if (again) return { project: again, created: false }; // 并发重入：另一请求刚建好，直接复用
           const info = db
-            .prepare('INSERT INTO projects (event_id, group_id, name, description, access_key, port) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(event.id, group.id, projectName, description, genAccessKey(), port);
+            .prepare('INSERT INTO projects (event_id, group_id, name, description, access_key, port, client_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .run(event.id, group.id, projectName, description, genAccessKey(), port, clientId || null);
           return { project: db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid), created: true };
         });
         const run = tx(); // transaction() 返回包装函数，必须调用才执行
@@ -263,6 +307,7 @@ router.post('/register', aw(async (req, res) => {
         createdNow = run.created;
         break;
       } catch (e) {
+        if (e.regCode === 'NAME_TAKEN') return res.status(409).json(e.payload);
         if (isUniqueViolation(e) && attempt < 3) {
           port = null; // 端口在探测后被并发占用：换下一个候选端口重来
           continue;
@@ -275,14 +320,29 @@ router.post('/register', aw(async (req, res) => {
     }
     notifyRefresh('project-created');
   }
+  if (!createdNow) {
+    // 幂等命中：提示名称是否与首次绑定的不一致（项目名称以首次注册为准）
+    const bound = db
+      .prepare(
+        `SELECT d.name AS dept, g.name AS grp, p.name AS project FROM projects p
+           JOIN groups g ON g.id = p.group_id JOIN departments d ON d.id = g.department_id
+          WHERE p.id = ?`
+      )
+      .get(project.id);
+    if (bound && (bound.dept !== deptName || bound.grp !== groupName || bound.project !== projectName)) {
+      nameMismatch = `本次提交的名称与首次注册不一致（已绑定为「${bound.dept} / ${bound.grp} / ${bound.project}」，以首次为准；如需改名请联系管理员）`;
+    }
+  }
   audit(project.id, 'register', 1, null, createdNow ? '自助注册（新项目）' : '自助注册（幂等补发密钥）', ip);
 
   res.json({
     ok: true,
     code: 'REGISTERED',
     idempotent: !createdNow,
+    clientId: project.client_id || null,
+    clientBound: !!project.client_id,
+    warning: nameMismatch || (project.revoked ? '该密钥已被管理员吊销，请联系赛事管理员恢复' : undefined),
     revoked: !!project.revoked,
-    warning: project.revoked ? '该密钥已被管理员吊销，请联系赛事管理员恢复' : undefined,
     eventId: event.id,
     projectName: project.name,
     accessKey: project.access_key,
@@ -359,6 +419,39 @@ router.post('/loop', aw(async (req, res) => {
   });
 }));
 
+// 客户端绑定（手工发 key 模式：--init 落盘后调用；也用于校验绑定状态）
+// 首次绑定成功；同一 clientId 重复调用幂等；已绑定其他 clientId → 409 CLIENT_MISMATCH（防止一把密钥在多台机器上互相覆盖）
+router.post('/bind-client', (req, res) => {
+  const { accessKey, clientId } = req.body || {};
+  if (!accessKey || typeof accessKey !== 'string') {
+    return res.status(400).json({ ok: false, code: 'INVALID_KEY', error: '缺少 accessKey' });
+  }
+  const cid = String(clientId ?? '').trim();
+  if (!CLIENT_ID_RE.test(cid)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_CLIENT_ID', error: 'clientId 格式无效（应为 cli_ + 32 位十六进制）' });
+  }
+  const project = db.prepare('SELECT * FROM projects WHERE access_key = ?').get(accessKey.trim());
+  if (!project || project.archived) {
+    return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: 'accessKey 无效' });
+  }
+  if (project.revoked) {
+    return res.status(403).json({ ok: false, code: 'KEY_REVOKED', error: '该 accessKey 已被管理员吊销，请联系管理员' });
+  }
+  if (!project.client_id) {
+    db.prepare("UPDATE projects SET client_id = ?, updated_at = datetime('now','localtime') WHERE id = ? AND client_id IS NULL").run(cid, project.id);
+    audit(project.id, 'bind', 1, null, '手工模式绑定客户端标识', req.ip || '');
+    return res.json({ ok: true, code: 'BOUND', bound: true, clientId: cid });
+  }
+  if (project.client_id === cid) {
+    return res.json({ ok: true, code: 'BOUND', bound: true, idempotent: true, clientId: cid });
+  }
+  return res.status(409).json({
+    ok: false,
+    code: 'CLIENT_MISMATCH',
+    error: '该密钥已绑定其他客户端（可能已在另一台机器接入过）。如确需迁移，请管理员在后台「解绑客户端」后重试',
+  });
+});
+
 // Agent 查询当前进度与下一节点（409 自愈 / --verify 定位部署地址用）
 router.get('/report/status', (req, res) => {
   const accessKey = req.query.accessKey;
@@ -374,6 +467,7 @@ router.get('/report/status', (req, res) => {
     projectName: project.name,
     port: project.port,
     loopCount: project.loop_count || 1,
+    clientId: project.client_id || null,
     completedStages: project.completed_stages,
     progress: progressPercent(project.completed_stages),
     nextStage: next,

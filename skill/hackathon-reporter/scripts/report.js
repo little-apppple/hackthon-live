@@ -10,10 +10,14 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn, execSync } = require('child_process');
 
 // 与服务端 STAGES.length 对齐的节点总数（八节点模型）
 const TOTAL_STAGES = 8;
+
+// 客户端唯一标识：首次接入时生成并绑定到项目，防止重名队伍互相覆盖
+const genClientId = () => 'cli_' + crypto.randomBytes(16).toString('hex');
 
 const USAGE = `用法:
   node report.js --init [--server-url <地址> --access-key <密钥>] [--deploy-url <地址>] [--force]     # 手工模式
@@ -301,9 +305,9 @@ function bakedConfig() {
   }
 }
 
-// 注册模式：向服务端自助注册换取 accessKey（幂等，可安全重跑）
-async function registerOnServer(serverUrl, registerToken, { department, group, project, description }) {
-  const payload = JSON.stringify({ department, group, project, description: description || '', registerToken });
+// 注册模式：向服务端自助注册换取 accessKey（以 clientId 幂等，可安全重跑）
+async function registerOnServer(serverUrl, registerToken, { department, group, project, description, clientId }) {
+  const payload = JSON.stringify({ department, group, project, description: description || '', registerToken, clientId });
   const { status, body } = await callApiWithRetry(
     { serverUrl },
     '/api/register',
@@ -325,12 +329,30 @@ async function registerOnServer(serverUrl, registerToken, { department, group, p
     console.error('✗ 注册失败：注册令牌缺失或不正确。请使用本期下发的技能包（内含注册令牌），或改用管理员发 key 模式。');
     process.exit(1);
   }
+  if (status === 409 && body?.code === 'NAME_TAKEN') {
+    console.error(`✗ 注册失败：${body.error}`);
+    process.exit(1);
+  }
+  if (status === 400 && body?.code === 'INVALID_CLIENT_ID') {
+    console.error('✗ 注册失败：本地客户端标识格式无效，请删除 hackathon.config.json 后重跑 --init 重新生成。');
+    process.exit(1);
+  }
   console.error(`✗ 注册失败 [${body?.code || 'HTTP ' + status}]: ${body?.error || '未知错误'}`);
   process.exit(1);
 }
 
 async function cmdInit(args) {
   const target = path.resolve(process.cwd(), 'hackathon.config.json');
+  // 客户端标识：沿用既有配置里的（--force 重跑不变），没有则首次生成并绑定
+  let clientId = null;
+  try {
+    clientId = JSON.parse(fs.readFileSync(target, 'utf-8')).clientId || null;
+  } catch {
+    /* 首次接入或配置损坏：重新生成 */
+  }
+  const isFirstBind = !clientId;
+  if (!clientId) clientId = genClientId();
+
   if (fs.existsSync(target) && !args.force) {
     console.log('✓ 已存在 hackathon.config.json，无需重复初始化。');
     console.log('  如需覆盖重新生成：node report.js --init --force');
@@ -341,6 +363,7 @@ async function cmdInit(args) {
   let serverUrl = args.serverUrl || baked.serverUrl;
   let accessKey = args.accessKey;
   let deployUrl = args.deployUrl;
+  let boundByRegister = false;
 
   if (accessKey && (args.department || args.group || args.project)) {
     console.warn('⚠ 已提供 --access-key（手工模式），忽略 --department/--group/--project 注册参数');
@@ -393,16 +416,23 @@ async function cmdInit(args) {
       group: args.group,
       project: args.project,
       description: args.description,
+      clientId,
     });
     accessKey = r.accessKey;
     deployUrl = r.deployUrl;
+    boundByRegister = true;
     console.log(
       r.idempotent
-        ? '✓ 该「部门/小组/项目名」已注册过，返回原有 accessKey（幂等下发）'
+        ? '✓ 已找到本客户端此前注册的项目，返回原有 accessKey（按客户端标识幂等）'
         : '✓ 注册成功，已录入名单并预留部署端口'
     );
     console.log(`  accessKey: ${accessKey}`);
     console.log(`  部署端口: ${r.port}（${r.deployUrl}）`);
+    if (r.warning) console.warn(`  ⚠ ${r.warning}`);
+    if (isFirstBind && r.clientBound) {
+      console.log(`  客户端标识: ${clientId}（已绑定到本项目）`);
+      console.log('  注意：该标识保存在 hackathon.config.json，换机器/重装请连同配置一起带走；丢失需管理员在后台解绑后重新接入。');
+    }
   } else if (!serverUrl || !accessKey) {
     // ── 模式 B：管理员发放（原有交互）──
     console.log('== 黑客松 skill 首次接入 ==');
@@ -435,12 +465,34 @@ async function cmdInit(args) {
   const cfg = {
     serverUrl,
     accessKey,
+    clientId,
     deploy: { type: 'node', start: 'npm start', install: true, dir: '.' },
     verify: { api: 'npm run test:api', e2e: 'npm run test:e2e' },
   };
   if (deployUrl) cfg.deployUrl = String(deployUrl).trim();
   fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + '\n');
   console.log(`\n✓ 已生成 ${target}`);
+
+  // 手工发 key 模式：把 clientId 绑定到该密钥对应项目（注册模式已在 /api/register 内绑定，无需重复）
+  if (isFirstBind && !boundByRegister && serverUrl && accessKey) {
+    try {
+      const { status, body } = await callApiWithRetry({ serverUrl }, '/api/bind-client', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessKey, clientId }),
+      });
+      if (status === 200 && body?.ok) {
+        console.log(`  客户端标识: ${clientId}（已绑定到本项目密钥）`);
+      } else if (status === 409 && body?.code === 'CLIENT_MISMATCH') {
+        console.error(`✗ 客户端绑定失败：${body.error}`);
+        process.exit(1);
+      } else {
+        console.warn(`  ⚠ 客户端标识绑定未完成（HTTP ${status}${body?.code ? ' ' + body.code : ''}）：不影响当前使用，稍后可重跑 --init --force 或联系管理员`);
+      }
+    } catch {
+      console.warn('  ⚠ 客户端标识绑定未完成（网络不可达）：不影响当前使用，联网后重跑 --init --force 即可');
+    }
+  }
   console.log('  纯前端静态站把 deploy 改为 { "type": "static", "dir": "dist" }。');
   await runDoctor(cfg);
   return cmdNext(args, cfg);
@@ -506,6 +558,10 @@ async function runDoctor(cfg, configBroken) {
   // 5. verify 配置
   if (cfg?.verify?.api && cfg?.verify?.e2e) ok('verify.api / verify.e2e 已配置');
   else warn('verify.api / verify.e2e 未配置完整', '「本地测试」节点前写好真实测试命令并填入配置——线上验收会执行它们，未配置的验收步骤会被跳过');
+
+  // 5b. 客户端标识绑定（防止重名队伍互相覆盖）
+  if (cfg?.clientId && /^cli_[0-9a-f]{32}$/.test(cfg.clientId)) ok('客户端标识已绑定（clientId 存在于配置中）');
+  else if (cfg) warn('配置缺少客户端标识 clientId', '重跑 node report.js --init --force 完成绑定（防止与其他重名队伍互相覆盖进度）');
 
   // 6. 项目工程
   const pkg = readLocalPkg();

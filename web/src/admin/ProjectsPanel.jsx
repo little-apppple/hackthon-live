@@ -82,6 +82,15 @@ export default function ProjectsPanel({ eventId }) {
     } else flash(data?.error || '操作失败', false);
   };
 
+  const unbindClient = async (p) => {
+    if (!confirm(`确认解绑「${p.name}」的客户端标识？\n解绑后该队可用新的接入配置重新绑定（accessKey 不变，进度保留）。`)) return;
+    const { ok, data } = await api.post(`/api/admin/projects/${p.id}/rebind-client`);
+    if (ok) {
+      flash(`已解绑「${p.name}」的客户端`);
+      loadAll();
+    } else flash(data?.error || '解绑失败', false);
+  };
+
   const visible = projects.filter((p) => (showArchived ? true : !p.archived));
   const groupById = Object.fromEntries(groups.map((g) => [g.id, g]));
 
@@ -202,6 +211,7 @@ export default function ProjectsPanel({ eventId }) {
               <th>部门</th>
               <th>小组</th>
               <th>项目</th>
+              <th>客户端</th>
               <th>端口</th>
               <th>进度</th>
               <th>状态</th>
@@ -218,6 +228,19 @@ export default function ProjectsPanel({ eventId }) {
                 <td className="cell-name" title={p.description}>
                   {p.name}
                   {(p.loop_count || 1) > 1 && <span className="mini-num">LOOP×{p.loop_count}</span>}
+                </td>
+                <td>
+                  {p.client_id ? (
+                    <button
+                      className="key-btn mono"
+                      title={`已绑定客户端 ${p.client_id}（点击解绑，队伍换机器时用）`}
+                      onClick={() => unbindClient(p)}
+                    >
+                      {p.client_id.slice(0, 12)}…解绑
+                    </button>
+                  ) : (
+                    <span className="dim-cell">未绑定</span>
+                  )}
                 </td>
                 <td className="mono">{p.port}</td>
                 <td>

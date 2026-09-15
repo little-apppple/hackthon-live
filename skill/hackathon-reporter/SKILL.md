@@ -29,7 +29,7 @@ description: 黑客松参赛项目进度自动上报、自动部署与线上验�
 
 技能包的 `skill/hackathon-reporter/server.json` 内置了上报地址和本期**注册令牌**（管理员打包时写入）。此时执行 `node <skill目录>/scripts/report.js --init` 会引导填写**部门、小组、项目名称**（Agent 可代填：`--init --department <部门> --group <小组> --project <项目名>`，可选 `--description`，各限 50 字符），发送到服务端 `/api/register` 完成报名：录入名单、预留部署端口、发放 accessKey，并写入服务端审计（stage=register）。
 
-**幂等语义：相同「部门/小组/项目名」只生成一次密钥，重复执行返回同一 accessKey**——可安全重跑、可多处补发配置；同组不同项目名是不同项目、各自有独立密钥。若返回的密钥已被管理员吊销，CLI 会停止并提示联系管理员。
+**幂等与客户端绑定：每个项目首次接入时会生成唯一的客户端标识 `clientId`（`cli_` 开头，保存在 `hackathon.config.json`）并绑定到服务端项目——重复执行 `--init` 按 clientId 幂等返回同一 accessKey（可安全重跑、可多处补发配置）；不同客户端使用完全相同的「部门/小组/项目名」会被拒绝（409 `NAME_TAKEN`），不会互相覆盖进度。**请务必保管好 `hackathon.config.json`（含 clientId）；换机器/重装需一并带走，丢失则由管理员在后台「解绑客户端」后重新接入。若返回的密钥已被管理员吊销，CLI 会停止并提示联系管理员。
 
 **模式 B · 管理员发放**
 

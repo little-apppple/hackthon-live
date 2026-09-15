@@ -308,7 +308,7 @@ router.get('/projects', (req, res) => {
   const eventId = resolveEventId(req);
   const rows = db
     .prepare(
-      `SELECT p.id, p.name, p.description, p.port, p.access_key, p.completed_stages, p.loop_count, p.status,
+      `SELECT p.id, p.name, p.description, p.port, p.access_key, p.completed_stages, p.loop_count, p.client_id, p.status,
               p.revoked, p.archived, p.last_report_at, p.created_at,
               g.name AS group_name, g.id AS group_id, d.name AS department_name, d.id AS department_id
          FROM projects p
@@ -382,6 +382,16 @@ router.post('/projects/:id/restore', (req, res) => {
     .run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ ok: false, error: '项目不存在或已归档' });
   notifyRefresh('restore');
+  res.json({ ok: true });
+});
+
+// 解绑客户端标识：队伍换机器/丢配置时，管理员清空绑定后其可重新接入
+router.post('/projects/:id/rebind-client', (req, res) => {
+  const info = db
+    .prepare("UPDATE projects SET client_id = NULL, updated_at = datetime('now','localtime') WHERE id = ? AND archived = 0")
+    .run(req.params.id);
+  if (info.changes === 0) return res.status(404).json({ ok: false, error: '项目不存在或已归档' });
+  notifyRefresh('client-unbind');
   res.json({ ok: true });
 });
 

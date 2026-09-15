@@ -155,6 +155,13 @@ try {
   /* 列已存在 */
 }
 
+// 迁移：客户端唯一标识（首次接入时生成并绑定，防止重名队伍互相覆盖）
+try {
+  db.exec('ALTER TABLE projects ADD COLUMN client_id TEXT');
+} catch {
+  /* 列已存在 */
+}
+
 // 迁移：无活动概念的旧库 → 全部数据归入默认活动（id=1）
 if (columnsOf('departments').length > 0 && !columnsOf('departments').includes('event_id')) {
   db.pragma('foreign_keys = OFF');

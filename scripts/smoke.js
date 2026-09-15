@@ -287,7 +287,7 @@ async function api(method, path, body, useAuth = true) {
     check('测试项目已清理', destroyed.data.ok);
   }
 
-  console.log(`\n== 11. 自助注册（/api/register 幂等发 key + 注册令牌）==`);
+  console.log(`\n== 11. 自助注册（/api/register 以 clientId 幂等 + 注册令牌）==`);
   {
     const reg = (body) => api('POST', '/api/register', body, false);
     const token = (await api('GET', '/api/admin/register-token')).data.token;
@@ -299,32 +299,60 @@ async function api(method, path, body, useAuth = true) {
     check('错误注册令牌 401', badToken.status === 401 && badToken.data.code === 'REGISTER_TOKEN_INVALID');
     const missing = await reg({ department: '测试部门A', group: '创新组', registerToken: token });
     check('缺项目名 400（参数校验先于令牌校验）', missing.status === 400 && missing.data.code === 'INVALID_PARAMS');
+    const badClient = await reg({ department: 'a', group: 'b', project: 'c', registerToken: token, clientId: 'cli_zz' });
+    check('非法 clientId 400', badClient.status === 400 && badClient.data.code === 'INVALID_CLIENT_ID');
 
-    const first = await reg({ department: '注册测试部', group: '注册组', project: '注册项目X', description: '冒烟测试', registerToken: token });
+    const cliA = 'cli_' + 'a'.repeat(32);
+    const cliB = 'cli_' + 'b'.repeat(32);
+    const first = await reg({ department: '注册测试部', group: '注册组', project: '注册项目X', description: '冒烟测试', registerToken: token, clientId: cliA });
     check('注册成功并发放 hk_ 密钥', first.status === 200 && first.data.ok && /^hk_[0-9a-f]{32}$/.test(first.data.accessKey || ''), JSON.stringify(first.data));
     check('注册时已预留部署端口', first.data.ok && Number.isInteger(first.data.port) && first.data.port >= 4100 && first.data.port <= 4999, JSON.stringify(first.data));
     check('返回 configTemplate（serverUrl/accessKey/deployUrl）', first.data.ok && first.data.configTemplate?.accessKey === first.data.accessKey);
+    check('注册响应回显绑定的 clientId', first.data.clientId === cliA && first.data.clientBound === true);
 
-    const again = await reg({ department: '注册测试部', group: '注册组', project: '注册项目X', registerToken: token });
-    check('重复注册幂等：返回同一密钥', again.data.ok && again.data.accessKey === first.data.accessKey && again.data.idempotent === true, JSON.stringify(again.data));
+    const again = await reg({ department: '注册测试部', group: '注册组', project: '注册项目X', registerToken: token, clientId: cliA });
+    check('同 clientId 重复注册幂等：返回同一密钥', again.data.ok && again.data.accessKey === first.data.accessKey && again.data.idempotent === true, JSON.stringify(again.data));
 
-    const other = await reg({ department: '注册测试部', group: '注册组', project: '注册项目Y', registerToken: token });
-    check('同组不同项目名生成不同密钥', other.data.ok && other.data.accessKey !== first.data.accessKey);
+    const renamed = await reg({ department: '改名部门', group: '改名组', project: '改名项目', registerToken: token, clientId: cliA });
+    check('同 clientId 换名仍返回同一密钥（并提示名称以首次为准）', renamed.data.ok && renamed.data.accessKey === first.data.accessKey && /不一致/.test(renamed.data.warning || ''), JSON.stringify(renamed.data));
+
+    const clash = await reg({ department: '注册测试部', group: '注册组', project: '注册项目X', registerToken: token, clientId: cliB });
+    check('不同 clientId 撞已绑定名称 → 409 NAME_TAKEN（不再互相覆盖）', clash.status === 409 && clash.data.code === 'NAME_TAKEN', JSON.stringify(clash.data));
+
+    // 一个 clientId 对应一个项目：另建项目必须使用新 clientId（=新目录接入）
+    const cliC = 'cli_' + 'c'.repeat(32);
+    const other = await reg({ department: '注册测试部', group: '注册组', project: '注册项目Y', registerToken: token, clientId: cliC });
+    check('新 clientId 可另建项目并生成不同密钥', other.data.ok && other.data.accessKey !== first.data.accessKey, JSON.stringify(other.data));
+
+    // 手工发 key 模式的客户端绑定
+    const bindSame = await api('POST', '/api/bind-client', { accessKey: first.data.accessKey, clientId: cliA }, false);
+    check('bind-client 同 clientId 幂等', bindSame.status === 200 && bindSame.data.idempotent === true);
+    const bindDiff = await api('POST', '/api/bind-client', { accessKey: first.data.accessKey, clientId: cliB }, false);
+    check('bind-client 不同 clientId → 409 CLIENT_MISMATCH', bindDiff.status === 409 && bindDiff.data.code === 'CLIENT_MISMATCH');
+    const bindBad = await api('POST', '/api/bind-client', { accessKey: first.data.accessKey, clientId: 'nope' }, false);
+    check('bind-client 非法 clientId 400', bindBad.status === 400 && bindBad.data.code === 'INVALID_CLIENT_ID');
 
     const snap = await api('GET', '/api/snapshot', undefined, false);
     const dept = snap.data.snapshot?.departments?.find((d) => d.name === '注册测试部');
     check('自注册项目进入大屏快照', !!dept);
 
-    // 审计：注册成功留痕（注册类写入动态流，stage=register）
+    // 审计：注册成功留痕
     const list = await api('GET', '/api/admin/projects');
     const mine = list.data.projects.filter((p) => p.name === '注册项目X' || p.name === '注册项目Y');
     check('注册写入审计（reports 留痕）', mine.length === 2);
+    check('管理端可查 client_id', mine.every((p) => String(p.client_id || '').startsWith('cli_')));
     const feed = await api('GET', '/api/snapshot', undefined, false);
     check(
       '注册事件进入动态流',
       feed.data.snapshot?.events?.some((e) => e.stage === 'register' && e.ok),
       JSON.stringify((feed.data.snapshot?.events || []).slice(0, 3))
     );
+
+    // 管理端解绑：清空后另一个客户端可认领
+    const unbind = await api('POST', `/api/admin/projects/${mine[0].id}/rebind-client`);
+    check('管理员解绑客户端成功', unbind.data.ok);
+    const claim = await reg({ department: '注册测试部', group: '注册组', project: '注册项目X', registerToken: token, clientId: cliB });
+    check('解绑后可被新客户端重新绑定', claim.status === 200 && claim.data.clientId === cliB && claim.data.idempotent === true, JSON.stringify(claim.data));
 
     // 清理：注册产生的项目/小组/部门不留在主库
     for (const p of mine) {
