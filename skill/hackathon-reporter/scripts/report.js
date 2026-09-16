@@ -179,6 +179,10 @@ function loadConfig(file) {
   }
 }
 
+function authHeader(cfg) {
+  return { 'x-access-key': cfg.accessKey };
+}
+
 async function callApi(cfg, urlPath, options) {
   // 小 JSON 请求默认 20s 超时：服务端挂起时让网络重试机制有机会接管
   const opts = { signal: AbortSignal.timeout(20000), ...options };
@@ -232,7 +236,8 @@ async function main() {
     try {
       const { status, body } = await callApiWithRetry(
         cfg,
-        `/api/report/status?accessKey=${encodeURIComponent(cfg.accessKey)}`
+        '/api/report/status',
+        { headers: authHeader(cfg) }
       );
       if (status === 200 && body?.ok) {
         if (body.revoked) {
@@ -728,7 +733,7 @@ async function cmdLoop(args, cfg) {
 async function cmdSubmit(args, cfg) {
   let st;
   try {
-    const r = await callApiWithRetry(cfg, `/api/report/status?accessKey=${encodeURIComponent(cfg.accessKey)}`);
+    const r = await callApiWithRetry(cfg, '/api/report/status', { headers: authHeader(cfg) });
     if (r.status !== 200 || !r.body?.ok) return printApiError(r.status, r.body);
     st = r.body;
   } catch {
@@ -792,7 +797,7 @@ async function cmdSubmit(args, cfg) {
 async function cmdNext(args, cfg) {
   let status;
   try {
-    const r = await callApiWithRetry(cfg, `/api/report/status?accessKey=${encodeURIComponent(cfg.accessKey)}`);
+    const r = await callApiWithRetry(cfg, '/api/report/status', { headers: authHeader(cfg) });
     status = r.body;
     if (r.status !== 200 || !status?.ok) return printApiError(r.status, r.body);
   } catch {
@@ -904,15 +909,29 @@ async function cmdDeploy(args, cfg) {
 
   // 2. 上传部署
   console.log(`→ 上传 ${(body.length / 1024 / 1024).toFixed(1)} MB 并部署到预留端口…`);
-  const q = new URLSearchParams({ accessKey: cfg.accessKey, type, start: startCmd, install: install ? '1' : '0' });
+  const q = new URLSearchParams({ type, start: startCmd, install: install ? '1' : '0' });
   try {
-    const res = await fetch(cfg.serverUrl.replace(/\/$/, '') + '/api/deploy?' + q, {
+    let res = await fetch(cfg.serverUrl.replace(/\/$/, '') + '/api/deploy?' + q, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/gzip' },
+      headers: { 'Content-Type': 'application/gzip', ...authHeader(cfg) },
       body,
       signal: AbortSignal.timeout(300000),
     });
-    const data = await res.json().catch(() => null);
+    let data = await res.json().catch(() => null);
+    // 限频自动等待重试一次（与上报/迭代/终审一致）
+    if (res.status === 429 && data?.retryAfterSeconds) {
+      const wait = Math.min(data.retryAfterSeconds, 15);
+      console.log(`⏳ 部署过于频繁，${wait} 秒后自动重试…`);
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      const again = await fetch(cfg.serverUrl.replace(/\/$/, '') + '/api/deploy?' + q, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/gzip', ...authHeader(cfg) },
+        body,
+        signal: AbortSignal.timeout(300000),
+      });
+      res = again;
+      data = await again.json().catch(() => null);
+    }
     if (res.ok && data?.ok) {
       console.log(`✓ 部署成功: ${data.deployUrl}`);
       if (data.stageReported) {
@@ -964,7 +983,7 @@ async function cmdVerify(args, cfg) {
   // 1. 定位部署地址与当前进度
   let status;
   try {
-    const r = await callApiWithRetry(cfg, `/api/report/status?accessKey=${encodeURIComponent(cfg.accessKey)}`);
+    const r = await callApiWithRetry(cfg, '/api/report/status', { headers: authHeader(cfg) });
     status = r.body;
     if (r.status !== 200 || !status?.ok) return printApiError(r.status, r.body);
   } catch {

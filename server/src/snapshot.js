@@ -118,6 +118,20 @@ function buildSnapshot(eventId) {
     }
   }
 
+  // 已提交（最终参赛作品）列表：按提交时间倒序，供大屏「已完成项目列表」与烟花通知使用
+  const submittedProjects = db
+    .prepare(
+      `SELECT p.id AS projectId, p.name, p.loop_count, p.port, p.last_report_at,
+              g.name AS grp, d.name AS department
+         FROM projects p
+         JOIN groups g ON g.id = p.group_id
+         JOIN departments d ON d.id = g.department_id
+        WHERE p.event_id = ? AND p.archived = 0 AND p.revoked = 0 AND p.completed_stages >= ${STAGES.length}
+        ORDER BY p.last_report_at DESC, p.id DESC`
+    )
+    .all(eid)
+    .map((p) => ({ ...p, link: config.publicHost ? `http://${config.publicHost}:${p.port}` : null }));
+
   return {
     eventId: eid,
     eventName: event.name,
@@ -130,11 +144,13 @@ function buildSnapshot(eventId) {
       projects: kpiRow.projects || 0,
       deployed: kpiRow.deployed || 0,
       done: kpiRow.done || 0,
+      submitted: submittedProjects.length,
       completion: Math.round((kpiRow.avg_stages / STAGES.length) * 100),
     },
     departments: deptTree,
     events,
     loadingProjects,
+    submittedProjects,
   };
 }
 

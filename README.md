@@ -68,7 +68,7 @@ npm run skill:e2e      # 参赛技能包全旅程端到端测试（打包→解�
 npm run deploy:e2e     # 自动部署端到端测试（node/static/自动上报/重启停止/未到节点）
 ```
 
-- 大屏：`http://localhost:3000/`
+- 大屏：`http://localhost:3000/`（含**已提交作品榜**、提交时**全屏烟花 + 2 秒庆祝横幅**、阶段完成**底部短气泡**（多条逐一排队，提交类插队）；彩排演示访问 `/?celebrate=1`）
 - 管理后台：`http://localhost:3000/admin`（默认密码 `hackathon2026`）
 - 开发模式：`npm run dev:server` + `npm run dev:web`（Vite 5173，/api 自动代理）
 - 迭代口径：`--loop` 开新一轮后进度与 KPI 按**当前轮次**统计（历史在审计流）；loop 后大屏项目卡链接暂时熄灭（进入新一轮），需在新一轮重新走到「上线部署」节点后链接才恢复（服务端部署进程在旧链接熄灭期间仍在运行，可从后台管理）
@@ -103,7 +103,8 @@ node skill/vibecoding-workflow/scripts/setup.js --project <目录>  # 面向其�
 | `SESSION_TTL_MS` | 86400000 | 管理后台会话有效期 |
 | `DEPLOY_PATH_PREPEND` | - | 部署进程 PATH 前置目录（如 /opt/node22/bin） |
 | `DEPLOY_ROOT` | server/data/deploys | 自动部署产物与运行目录 |
-| `DEPLOY_MAX_MB` | 200 | 部署产物大小上限 |
+| `DEPLOY_MAX_MB` | 200 | 部署产物大小上限（解包后大小/文件数同样受配额限制） |
+| `DEPLOY_RATE_LIMIT_MS` | 10000 | 同一项目两次部署的最小间隔（自动部署防刷） |
 | `DEPLOY_START_TIMEOUT_MS` | 60000 | 部署启动探活超时 |
 
 生产环境启动示例：
@@ -121,6 +122,29 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 5. **自动部署（上线部署节点）**：小组 Agent 执行 `node report.js --deploy`——自动打包上传（排除 node_modules/.git），服务端解压到 `data/deploys/<项目ID>/`、按需 `npm install`、以预留端口启动（或托管静态站），60 秒内探活通过后**自动上报「上线部署」**并点亮大屏链接。崩溃自动重启（最多 10 次）；服务重启后只恢复**当前活动**的部署进程。
 6. **线上验收（自动化）**：小组 Agent 执行 `node report.js --verify`——依次完成**线上应用探活 → 接口测试（`verify.api`）→ E2E 测试（`verify.e2e`）**，全部通过后自动上报验收并附证据；任一步失败则不上报（退出码 3），修复后重试。
 7. **监管**：后台可查看各项目部署进程状态、停止/启动/重启；可随时吊销/恢复 accesskey、归档项目（归档自动停服并释放端口）；所有上报（含被拒）与部署/验收证据都有审计记录。
+
+## 安全说明
+
+**已实施的加固**（面向内网/可信网络部署）：
+
+| 项 | 措施 |
+|---|---|
+| 部署目录穿越 | `dir` 参数三层校验（路由 400 / 解包前拒绝 / 启动期兜底），越界一律拒绝 |
+| 静态托管 | `serve` 拒绝 `.env*`、`hackathon.config.json`、`*.pem`、`*.key`；CLI 打包同样排除 `.env` |
+| 调度面密钥不外泄 | 部署子进程采用**环境变量白名单**（只给 PATH/PORT/临时目录等），不继承 `ADMIN_PASSWORD` 等 |
+| 运行身份 | systemd 以专用非 root 用户 `hackathon` 运行，密钥放独立 `EnvironmentFile`（600） |
+| 点击劫持 / 注入 | 全站安全响应头：`X-Frame-Options: DENY`、`nosniff`、`Referrer-Policy`、严格 CSP |
+| CSRF | 带 Cookie 的管理写操作校验 `Origin`（跨站拒绝；CLI/curl 无 Origin 放行） |
+| 密钥进日志 | `accessKey` 支持 `x-access-key` 请求头传输（CLI 已改用），不再强制出现在 URL/日志/Referer |
+| 注册与上报 | 本期注册令牌鉴权 + 每 IP 限频；上报/迭代/部署均有限频（部署 10s/项目，可配） |
+| 资源耗尽 | 部署产物上限 + **解包后文件数与总大小配额**（防 tar 炸弹/磁盘打满） |
+| 其他 | 登录限频（5 次/分/IP）、吊销即停服、归档释放端口、审计留痕（含 IP 与来源） |
+
+**已知残余风险（部署前请评估）**：
+
+1. **部署 = 在服务器上执行代码**：`--start` 与上传产物由参赛队控制，且部署进程与看板同机（虽已是非 root 用户，仍能读到同用户的数据库文件）。要彻底隔离需容器/沙箱，或把部署与调度分到两台机器；
+2. **明文 HTTP**：密钥与会话在链路上明文传输，公网/不可信网络请务必前置 HTTPS（如 Nginx/Caddy 反代），配好后 Cookie 会带 `Secure`；
+3. **数据库内 `accessKey` 为明文**（含注册令牌）：备份目录 `/opt/hackathon-live.bak-*` 已收紧为 700，请限制服务器登录权限并定期清理旧备份。
 
 ## API 一览
 

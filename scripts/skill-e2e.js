@@ -90,7 +90,7 @@ function writeFixture() {
   // ── 1. 独立测试服务（快速限频、独立 DB）──
   const server = spawn(process.execPath, ['server/src/index.js'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), RATE_LIMIT_MS: '300', DB_PATH: path.join(TMP, 'test.db'), PUBLIC_HOST: 'localhost', ADMIN_PASSWORD: ADMIN_PW },
+    env: { ...process.env, PORT: String(PORT), RATE_LIMIT_MS: '300', DEPLOY_RATE_LIMIT_MS: '300', DB_PATH: path.join(TMP, 'test.db'), PUBLIC_HOST: 'localhost', ADMIN_PASSWORD: ADMIN_PW },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   server.stderr.on('data', (d) => process.stderr.write('[server] ' + d));
@@ -271,6 +271,11 @@ function writeFixture() {
     check('大屏 8 节点模型', snap.stages.length === 8);
     const stages = new Set(snap.events.map((e) => e.stage));
     check('审计流含注册/迭代/终审事件', stages.has('register') && stages.has('loop') && stages.has('submission'), [...stages].join(','));
+    check(
+      '大屏已提交作品列表含本项目（含链接与提交时间）',
+      snap.submittedProjects?.some((p) => p.name === '技能包全链路用例' && p.link && p.last_report_at),
+      JSON.stringify(snap.submittedProjects)
+    );
   } finally {
     // 先经管理 API 停止被测项目部署（否则应用进程会随测试结束残留占用端口）
     try {

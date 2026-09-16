@@ -9,8 +9,11 @@ const router = express.Router();
 
 const aw = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// 部署限频：每项目 10 秒一次（防持 key 者并发推包打爆内存/磁盘）
+const deployLastAt = new Map(); // projectId -> epoch ms
+
 function findProject(req) {
-  const accessKey = req.query.accessKey;
+  const accessKey = req.query.accessKey || req.headers['x-access-key'];
   if (!accessKey) return { code: 400, body: { ok: false, code: 'INVALID_KEY', error: '缺少 accessKey' } };
   const project = db.prepare('SELECT * FROM projects WHERE access_key = ?').get(String(accessKey).trim());
   if (!project || project.archived) {
@@ -39,6 +42,16 @@ router.post(
         .status(413)
         .json({ ok: false, code: 'TOO_LARGE', error: `构建产物超过上限 ${config.deployMaxMb}MB` });
     }
+    const now = Date.now();
+    const last = deployLastAt.get(project.id) || 0;
+    const windowMs = config.deployRateLimitMs;
+    if (now - last < windowMs) {
+      const retryAfter = Math.ceil((windowMs - (now - last)) / 1000);
+      return res
+        .status(429)
+        .json({ ok: false, code: 'RATE_LIMITED', error: `部署过于频繁，请 ${retryAfter} 秒后重试`, retryAfterSeconds: retryAfter });
+    }
+    deployLastAt.set(project.id, now);
 
     const type = req.query.type === 'static' ? 'static' : 'node';
     const start = String(req.query.start || '').trim() || (type === 'node' ? 'npm start' : '');

@@ -302,6 +302,79 @@ a { color: var(--txt-bright); text-decoration: none; transition: all 0.2s ease; 
 .feed-reject .feed-text { color: var(--txt-dim); }
 .feed-reject-text { color: var(--red-hot); }
 
+/* ---- 已提交作品列表 ---- */
+.submitted-panel {
+  flex-shrink: 0; max-height: 236px; display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px;
+  background: linear-gradient(170deg, rgba(13, 13, 13, 0.92), rgba(6, 6, 6, 0.96));
+}
+.submitted-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.submitted-list::-webkit-scrollbar { width: 5px; }
+.submitted-list::-webkit-scrollbar-thumb { background: rgba(194, 59, 34, 0.3); }
+.submitted-empty { color: var(--txt-faint); font-size: 14px; text-align: center; padding: 16px 0; }
+.submitted-item {
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 4px;
+  border-left: 2px solid var(--red); background: rgba(194, 59, 34, 0.06);
+  animation: submittedIn .42s ease;
+}
+@keyframes submittedIn { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.submitted-rank { font-family: var(--font-mono); font-size: 13px; color: var(--red-hot); flex-shrink: 0; }
+.submitted-info { flex: 1; min-width: 0; }
+.submitted-name { font-size: 15px; font-weight: 700; color: var(--white); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.submitted-meta { font-size: 12px; color: var(--txt-dim); display: flex; gap: 8px; align-items: baseline; }
+.submitted-time { font-family: var(--font-mono); color: var(--txt-faint); }
+.submitted-link {
+  flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--white);
+  background: var(--red); padding: 3px 10px; border-radius: 4px;
+}
+.submitted-link:hover { background: var(--red-hot); }
+
+/* ---- 全屏烟花 ---- */
+.fireworks { position: absolute; inset: 0; width: 1920px; height: 1080px; pointer-events: none; z-index: 8; }
+
+/* ---- 通知气泡（串行播放：提交=居中大气泡 2s；阶段=底部短气泡 3.5s）---- */
+.notice {
+  position: absolute; z-index: 9; pointer-events: none;
+  border-radius: 8px; font-family: var(--font-mono);
+  animation: noticeIn .32s ease;
+}
+@keyframes noticeIn { from { transform: translateY(18px) scale(.96); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+.notice-main { display: flex; align-items: baseline; gap: 12px; }
+.notice-tag {
+  font-size: 12px; letter-spacing: 2px; color: var(--white); background: var(--red);
+  padding: 2px 8px; border-radius: 4px;
+}
+.notice-project { font-size: 20px; font-weight: 700; color: var(--white); text-shadow: 0 0 12px rgba(232, 232, 232, 0.3); }
+.notice-text { font-size: 15px; color: var(--txt); }
+.notice-meta { font-size: 12px; color: var(--txt-faint); margin-top: 4px; }
+
+/* 提交：居中大横幅 + 红边光晕 */
+.notice-submit {
+  left: 50%; top: 42%; transform: translate(-50%, -50%);
+  padding: 22px 40px; text-align: center;
+  background: rgba(8, 5, 4, 0.92); border: 2px solid var(--red);
+  box-shadow: 0 0 70px rgba(194, 59, 34, 0.45), inset 0 0 30px rgba(194, 59, 34, 0.12);
+  animation: submitPop .4s ease;
+}
+@keyframes submitPop { 0% { transform: translate(-50%, -50%) scale(.86); opacity: 0; } 60% { transform: translate(-50%, -50%) scale(1.03); } 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+.notice-submit .notice-main { justify-content: center; }
+.notice-submit .notice-project { font-size: 30px; }
+.notice-submit .notice-text { font-size: 17px; color: var(--txt-bright); }
+.notice-submit .notice-meta { text-align: center; }
+
+/* 阶段/迭代：底部中央短气泡 */
+.notice-stage, .notice-info {
+  left: 50%; bottom: 28px; padding: 10px 20px; background: rgba(10, 10, 10, 0.94);
+  border: 1px solid var(--line); border-left: 3px solid var(--red);
+  box-shadow: 0 6px 26px rgba(0, 0, 0, 0.55);
+  transform: translateX(-50%);
+  animation: noticeUp .34s ease;
+}
+@keyframes noticeUp { from { transform: translateX(-50%) translateY(18px); opacity: 0; } to { transform: translateX(-50%) translateY(0); opacity: 1; } }
+.notice-info { border-left-color: var(--txt-dim); }
+.notice-stage .notice-project, .notice-info .notice-project { font-size: 17px; }
+.notice-stage .notice-text, .notice-info .notice-text { font-size: 14px; }
+
 /* ============ 管理后台 ============ */
 .admin-page { min-height: 100%; background: radial-gradient(900px 400px at 15% -5%, rgba(194, 59, 34, 0.05), transparent 60%), var(--bg); }
 .admin-header { display: flex; align-items: center; gap: 28px; padding: 14px 28px; border-bottom: 1px solid var(--line); }

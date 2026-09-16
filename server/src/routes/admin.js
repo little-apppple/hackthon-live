@@ -73,6 +73,20 @@ router.get('/me', (req, res) => {
 
 router.use(requireAuth);
 
+// CSRF 防护：带 Cookie 的写操作必须是同源发起（浏览器会带 Origin 头，跨端口/跨站即拒绝）。
+// 非浏览器客户端（CLI/curl）不带 Origin，放行。
+router.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const origin = req.headers.origin;
+  if (!origin) return next();
+  try {
+    if (new URL(origin).host === req.headers.host) return next();
+  } catch {
+    /* Origin 非法按跨站处理 */
+  }
+  return res.status(403).json({ ok: false, code: 'CSRF_BLOCKED', error: '跨站请求被拒绝（Origin 不匹配）' });
+});
+
 // ---------- 活动 ----------
 router.get('/events', (req, res) => {
   const rows = db

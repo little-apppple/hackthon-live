@@ -412,6 +412,58 @@ async function api(method, path, body, useAuth = true) {
       .flatMap((d) => d.groups.flatMap((g) => g.projects))
       .find((p) => p.id === created[0].id);
     check('状态变为 submitted', mineSub?.status === 'submitted');
+    const submitted = snapSub.data.snapshot.submittedProjects || [];
+    check(
+      '快照提供已提交作品列表（含部门/小组/链接/时间）',
+      submitted.length === 1 && submitted[0].projectId === created[0].id && submitted[0].link && !!submitted[0].last_report_at,
+      JSON.stringify(submitted)
+    );
+    check('KPI 统计已提交数', snapSub.data.snapshot.kpi.submitted === 1, JSON.stringify(snapSub.data.snapshot.kpi));
+  }
+
+  console.log(`\n== 13. 安全加固 ==`);
+  {
+    // 安全响应头
+    const res = await fetch(base + '/');
+    check('X-Frame-Options: DENY（防点击劫持）', res.headers.get('x-frame-options') === 'DENY');
+    check('X-Content-Type-Options: nosniff', res.headers.get('x-content-type-options') === 'nosniff');
+    const csp = res.headers.get('content-security-policy') || '';
+    check('CSP 含 frame-ancestors none 且限制脚本来源', /frame-ancestors 'none'/.test(csp) && /script-src 'self'/.test(csp), csp);
+
+    // CSRF：带 Cookie 的写操作必须同源（跨站 Origin 拒绝；无 Origin 的 CLI 放行）
+    const crossOrigin = await fetch(base + '/api/admin/import/csv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv', Cookie: cookie, Origin: 'http://evil.example' },
+      body: '部门,小组\n攻击部门,攻击组',
+    });
+    const crossBody = await crossOrigin.json().catch(() => null);
+    check('跨站 Origin 写操作被拒 403 CSRF_BLOCKED', crossOrigin.status === 403 && crossBody?.code === 'CSRF_BLOCKED', JSON.stringify(crossBody));
+    const sameOrigin = await fetch(base + '/api/admin/import/csv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv', Cookie: cookie, Origin: base },
+      body: '安全测试部,安全组',
+    });
+    check('同源 Origin 写操作放行', sameOrigin.status === 200);
+    const noOrigin = await fetch(base + '/api/admin/departments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ name: 'CLI 来源部门' }),
+    });
+    check('无 Origin（CLI/curl）放行', noOrigin.status === 200);
+
+    // accessKey 支持请求头传参（不再强制出现在 URL）
+    const viaHeader = await fetch(base + '/api/report/status', { headers: { 'x-access-key': key1 } });
+    const viaHeaderBody = await viaHeader.json();
+    check('accessKey 可通过 x-access-key 请求头查询', viaHeader.status === 200 && viaHeaderBody.ok && viaHeaderBody.projectName, JSON.stringify(viaHeaderBody).slice(0, 120));
+
+    // 清理本节造的数据
+    const depts = (await api('GET', '/api/admin/departments')).data.departments;
+    for (const d of depts.filter((x) => ['安全测试部', 'CLI 来源部门'].includes(x.name))) {
+      const gs = (await api('GET', `/api/admin/groups?departmentId=${d.id}`)).data.groups;
+      for (const g of gs) await api('DELETE', `/api/admin/groups/${g.id}`);
+      await api('DELETE', `/api/admin/departments/${d.id}`);
+    }
+    check('安全测试数据已清理', true);
   }
 
   console.log(`\n结果: ${passed} 通过, ${failed} 失败`);

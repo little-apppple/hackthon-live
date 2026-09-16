@@ -90,6 +90,39 @@ function logTail(projectId, bytes = 4096) {
 
 // ---------- 启动器 ----------
 
+// 解包后的目录配额检查（文件数 + 总字节）
+function dirQuota(root, { maxFiles, maxBytes }) {
+  let files = 0;
+  let bytes = 0;
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return true;
+    }
+    for (const e of entries) {
+      if (files > maxFiles || bytes > maxBytes) return false;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!walk(p)) return false;
+      } else if (e.isFile()) {
+        files++;
+        try {
+          bytes += fs.statSync(p).size;
+        } catch {
+          /* 读不到大小按 0 计 */
+        }
+      }
+    }
+    return true;
+  };
+  if (!walk(root)) {
+    return { ok: false, reason: files > maxFiles ? `文件数超过 ${maxFiles}` : `解包后大小超过 ${Math.round(maxBytes / 1024 / 1024)}MB` };
+  }
+  return { ok: true, files, bytes };
+}
+
 // 把 meta.dir 解析到 app/ 内部：越界（..、绝对路径）一律拒绝——
 // 否则预留端口会变成任意目录的公开文件服务器（可读到含 accessKey 的数据库）。
 // 空字符串 = app 根目录本身，是合法默认值。
@@ -104,9 +137,23 @@ function resolveAppDir(project, dir) {
   return resolved;
 }
 
+// 部署子进程环境：只放行运行必需项（PATH/临时目录/时区等），
+// 绝不把调度面自身的密钥（ADMIN_PASSWORD 等）继承给参赛队代码
+const CHILD_ENV_ALLOW = [
+  'PATH', 'Path', 'PATHEXT', 'SYSTEMROOT', 'SystemRoot', 'SystemDrive', 'windir',
+  'TEMP', 'TMP', 'TMPDIR', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA',
+  'LANG', 'LC_ALL', 'TZ', 'NODE_ENV',
+];
 function childEnv(project) {
-  const extraPath = config.deployPathPrepend ? config.deployPathPrepend + ':' : '';
-  return { ...process.env, PORT: String(project.port), HOST: '0.0.0.0', PATH: extraPath + process.env.PATH };
+  const env = {};
+  for (const k of CHILD_ENV_ALLOW) {
+    if (process.env[k] !== undefined) env[k] = process.env[k];
+  }
+  env.PORT = String(project.port);
+  env.HOST = '0.0.0.0';
+  const prepend = config.deployPathPrepend ? config.deployPathPrepend + path.delimiter : '';
+  env.PATH = prepend + (process.env.PATH || '');
+  return env;
 }
 
 function startNodeApp(project, meta, state) {
@@ -310,6 +357,13 @@ async function deployProject(project, opts, archiveBuffer) {
     return { ok: false, error: '解压失败：' + e.message };
   }
   fs.rmSync(tmp, { force: true });
+
+  // 解包配额：限制文件数与总大小，防 tar 炸弹/磁盘打满
+  const quota = dirQuota(appDir, { maxFiles: 20000, maxBytes: config.deployMaxMb * 1024 * 1024 });
+  if (!quota.ok) {
+    fs.rmSync(appDir, { recursive: true, force: true });
+    return { ok: false, error: `构建产物超出配额：${quota.reason}` };
+  }
 
   const meta = {
     type: opts.type,

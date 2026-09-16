@@ -8,6 +8,21 @@ require('./db');
 
 const app = express();
 app.disable('x-powered-by');
+
+// 安全响应头：禁止被 iframe 嵌套（防点击劫持）、禁止 MIME 嗅探、收紧 CSP
+// （前端无外链脚本/字体，样式为内联 style 属性故保留 'unsafe-inline'）
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+      "connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  );
+  next();
+});
+
 app.use(express.json({ limit: '256kb' }));
 app.use(express.text({ type: ['text/csv', 'text/plain'], limit: '512kb' }));
 

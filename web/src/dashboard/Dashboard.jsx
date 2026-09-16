@@ -5,6 +5,8 @@ import KpiBar from './KpiBar.jsx';
 import DeptGrid from './DeptGrid.jsx';
 import Spotlight from './Spotlight.jsx';
 import EventFeed from './EventFeed.jsx';
+import SubmittedList from './SubmittedList.jsx';
+import NotificationCenter from './NotificationCenter.jsx';
 
 const ASCII_LOGO = String.raw`
  _   _ _____ _   _ _____ _    _   _ ___ ___
@@ -55,10 +57,16 @@ export default function Dashboard() {
           </main>
           <aside className="dash-side">
             <Spotlight loadingProjects={snapshot.loadingProjects} />
+            <SubmittedList items={snapshot.submittedProjects} />
             <EventFeed events={snapshot.events} />
           </aside>
         </div>
       </div>
+      <NotificationCenter
+        events={snapshot.events}
+        stages={snapshot.stages}
+        demoCelebrate={typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('celebrate') === '1'}
+      />
     </Scale>
   );
 }

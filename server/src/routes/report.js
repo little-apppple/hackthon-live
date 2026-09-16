@@ -453,8 +453,9 @@ router.post('/bind-client', (req, res) => {
 });
 
 // Agent 查询当前进度与下一节点（409 自愈 / --verify 定位部署地址用）
+// accessKey 优先取请求头（避免出现在 URL/日志/Referer 中），兼容旧版 CLI 的 query 传参
 router.get('/report/status', (req, res) => {
-  const accessKey = req.query.accessKey;
+  const accessKey = req.headers['x-access-key'] || req.query.accessKey;
   if (!accessKey) return res.status(400).json({ ok: false, code: 'INVALID_KEY', error: '缺少 accessKey' });
   const project = db.prepare('SELECT * FROM projects WHERE access_key = ?').get(String(accessKey).trim());
   if (!project || project.archived) {
