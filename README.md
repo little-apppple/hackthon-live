@@ -123,6 +123,16 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 6. **线上验收（自动化）**：小组 Agent 执行 `node report.js --verify`——依次完成**线上应用探活 → 接口测试（`verify.api`）→ E2E 测试（`verify.e2e`）**，全部通过后自动上报验收并附证据；任一步失败则不上报（退出码 3），修复后重试。
 7. **监管**：后台可查看各项目部署进程状态、停止/启动/重启；可随时吊销/恢复 accesskey、归档项目（归档自动停服并释放端口）；所有上报（含被拒）与部署/验收证据都有审计记录。
 
+## AI 参考评分
+
+参赛者执行 `--submit` 完成最终提交后，**自动**采集证据计算参考分并上报（`--no-score` 可跳过；`--score` 可单独重算，`--dry` 只算不报）。
+
+- **评分规范**：[docs/AI-SCORING.md](docs/AI-SCORING.md)（维度、权重、判定方法、红线）
+- **构成**：机器可判定 85 分（需求闭环 / 工程纪律 / 测试质量 / 交付上线）+ 主观项 15 分（单列待评委评审）+ 红线扣分（密钥入库、跳节点、刷上报等）
+- **证据链**：每项得分附证据行（文件路径、git 提交时间、服务端审计统计）；证据缺失即 0 分，不做善意推定
+- **产物**：项目内生成 `docs/ai-score.md`（可读报告）与 `docs/ai-score.json`（结构化明细）；服务端存档于 `projects.ai_score / ai_score_detail`，大屏已提交榜显示 `AI 85` 徽标，管理端项目表可见
+- **定位**：参考分，**不替代人工评审**
+
 ## 安全说明
 
 **已实施的加固**（面向内网/可信网络部署）：
@@ -154,6 +164,8 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 |---|---|---|
 | POST | `/api/report` | 上报节点完成 `{accessKey, stage, message, evidence?}` |
 | POST | `/api/register` | 自助注册：`{department, group, project, clientId, registerToken, description?}` → 录入名单+预留端口+发 accessKey；**以 clientId 幂等**（同一 clientId 重跑返回同一 key，换名亦然）；不同 clientId 撞同名 → 409 `NAME_TAKEN`。需本期注册令牌（管理员 `/api/admin/register-token` 签发）；错误码 `INVALID_PARAMS` / `INVALID_CLIENT_ID` / `REGISTER_TOKEN_INVALID` / `NAME_TAKEN` / `NO_FREE_PORT` / `PORT_CONFLICT`，每 IP 限频 10 次/分钟（按直连 IP 计，勿置于无 realip 配置的反向代理之后） |
+| POST | `/api/score` | AI 参考评分上报（**仅最终提交后**）：`{accessKey, score(0-100), detail}`，参数错误 `INVALID_SCORE`(400)/未提交 `SCORE_NOT_ALLOWED`(409)；评分规范见 docs/AI-SCORING.md |
+| GET | `/api/score` | 查询已存档的参考分与明细（`x-access-key` 请求头） |
 | POST | `/api/bind-client` | 手工发 key 模式绑定客户端：`{accessKey, clientId}`；首次绑定成功、同 clientId 幂等、他人已绑定 → 409 `CLIENT_MISMATCH` |
 | GET | `/api/report/status?accessKey=` | 查询进度（含 loopCount）、下一节点与预留端口 |
 | POST | `/api/loop` | `{accessKey}` 开新一轮迭代：进度重置、loop_count+1（≥上线部署才允许）；409 `LOOP_NOT_ALLOWED` |

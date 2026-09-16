@@ -452,6 +452,61 @@ router.post('/bind-client', (req, res) => {
   });
 });
 
+// AI 参考评分：最终提交后由 CLI 自动计算并上报（机器可判定维度 + 证据；主观项单列不计入自动分）
+// 只接受已提交（8/8）的项目；允许重算覆盖（以最后一次为准），历史留审计
+router.post('/score', aw(async (req, res) => {
+  const { accessKey, score, detail } = req.body || {};
+  const ip = req.ip || '';
+  if (!accessKey || typeof accessKey !== 'string') {
+    return res.status(400).json({ ok: false, code: 'INVALID_KEY', error: '缺少 accessKey' });
+  }
+  const project = db.prepare('SELECT * FROM projects WHERE access_key = ?').get(accessKey.trim());
+  if (!project || project.archived) {
+    return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: 'accessKey 无效' });
+  }
+  if (project.revoked) {
+    return res.status(403).json({ ok: false, code: 'KEY_REVOKED', error: '该 accessKey 已被管理员吊销' });
+  }
+  // 参数校验先于状态校验（与 /register 的约定一致：格式错误一律 400）
+  const value = Number(score);
+  if (!Number.isInteger(value) || value < 0 || value > 100) {
+    return res.status(400).json({ ok: false, code: 'INVALID_SCORE', error: 'score 需为 0-100 的整数' });
+  }
+  if (project.completed_stages < STAGES.length) {
+    return res.status(409).json({
+      ok: false,
+      code: 'SCORE_NOT_ALLOWED',
+      error: `仅最终提交（${STAGES.length}/${STAGES.length}）后可上报 AI 参考分，当前 ${project.completed_stages}/${STAGES.length}`,
+    });
+  }
+  const detailJson = detail && typeof detail === 'object' ? JSON.stringify(detail).slice(0, 20000) : null;
+  db.prepare(
+    `UPDATE projects SET ai_score = ?, ai_score_detail = ?, ai_scored_at = datetime('now','localtime'),
+        updated_at = datetime('now','localtime')
+      WHERE id = ? AND revoked = 0 AND archived = 0`
+  ).run(value, detailJson, project.id);
+  audit(project.id, 'score', 1, null, `AI 参考分 ${value}`, ip, detailJson);
+  notifyRefresh('score');
+  res.json({ ok: true, code: 'SCORED', score: value, scoredAt: new Date().toISOString().slice(0, 19).replace('T', ' ') });
+}));
+
+// 查询已上报的 AI 参考分（大屏/后台/CLI 复用）
+router.get('/score', (req, res) => {
+  const accessKey = req.headers['x-access-key'] || req.query.accessKey;
+  if (!accessKey) return res.status(400).json({ ok: false, code: 'INVALID_KEY', error: '缺少 accessKey' });
+  const project = db.prepare('SELECT * FROM projects WHERE access_key = ?').get(String(accessKey).trim());
+  if (!project || project.archived) {
+    return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: 'accessKey 无效' });
+  }
+  res.json({
+    ok: true,
+    projectName: project.name,
+    score: project.ai_score,
+    scoredAt: project.ai_scored_at,
+    detail: project.ai_score_detail ? JSON.parse(project.ai_score_detail) : null,
+  });
+});
+
 // Agent 查询当前进度与下一节点（409 自愈 / --verify 定位部署地址用）
 // accessKey 优先取请求头（避免出现在 URL/日志/Referer 中），兼容旧版 CLI 的 query 传参
 router.get('/report/status', (req, res) => {
@@ -462,6 +517,17 @@ router.get('/report/status', (req, res) => {
     return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: 'accessKey 无效' });
   }
   const next = project.completed_stages < STAGES.length ? stageByIndex(project.completed_stages + 1) : null;
+  // 过程审计统计：供 AI 评分采集证据（违规/刷上报等）
+  const stat = db
+    .prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS rejects,
+              SUM(CASE WHEN reject_code = 'STAGE_OUT_OF_ORDER' THEN 1 ELSE 0 END) AS outOfOrder,
+              SUM(CASE WHEN reject_code = 'RATE_LIMITED' THEN 1 ELSE 0 END) AS rateLimited,
+              SUM(CASE WHEN reject_code = 'INVALID_STAGE' THEN 1 ELSE 0 END) AS invalidStage
+         FROM reports WHERE project_id = ?`
+    )
+    .get(project.id) || {};
   res.json({
     ok: true,
     revoked: !!project.revoked,
@@ -472,6 +538,14 @@ router.get('/report/status', (req, res) => {
     completedStages: project.completed_stages,
     progress: progressPercent(project.completed_stages),
     nextStage: next,
+    score: project.ai_score,
+    stats: {
+      reports: stat.total || 0,
+      rejects: stat.rejects || 0,
+      outOfOrder: stat.outOfOrder || 0,
+      rateLimited: stat.rateLimited || 0,
+      invalidStage: stat.invalidStage || 0,
+    },
   });
 });
 

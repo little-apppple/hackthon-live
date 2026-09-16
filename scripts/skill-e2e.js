@@ -260,6 +260,13 @@ function writeFixture() {
     check('--submit 最终提交成功（8/8，100%）', sub.code === 0 && sub.out.includes('最终提交完成'), sub.out.slice(-200));
     const stSub = await statusOf(key1);
     check('终审后状态与进度', stSub.completedStages === 8 && stSub.progress === 100);
+    // 提交后自动触发 AI 参考评分并上报
+    check('--submit 后自动生成 AI 参考评分', sub.out.includes('AI 参考评分') && sub.out.includes('已上报'), sub.out.slice(-200));
+    check('评分报告已落盘 docs/ai-score.md', fs.existsSync(path.join(PARTICIPANT, 'docs', 'ai-score.md')));
+    const scoreResp = await (await fetch(BASE + '/api/score', { headers: { 'x-access-key': key1 } })).json();
+    check('服务端已存档参考分（0-85）', typeof scoreResp.score === 'number' && scoreResp.score >= 0 && scoreResp.score <= 85, JSON.stringify(scoreResp).slice(0, 160));
+    check('评分明细含维度与证据', !!scoreResp.detail?.dims?.A1?.evidence, JSON.stringify(scoreResp.detail?.dims || {}).slice(0, 160));
+
     const subAgain = await runSkill(['--submit', '--yes']);
     check('重复 --submit 幂等提示（退出码 0）', subAgain.code === 0 && subAgain.out.includes('已完成最终提交'));
 

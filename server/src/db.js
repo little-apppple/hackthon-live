@@ -155,6 +155,17 @@ try {
   /* 列已存在 */
 }
 
+// 迁移：AI 参考评分（提交后自动计算并上报）
+try {
+  db.exec('ALTER TABLE projects ADD COLUMN ai_score INTEGER');
+} catch {}
+try {
+  db.exec('ALTER TABLE projects ADD COLUMN ai_score_detail TEXT');
+} catch {}
+try {
+  db.exec('ALTER TABLE projects ADD COLUMN ai_scored_at TEXT');
+} catch {}
+
 // 迁移：客户端唯一标识（首次接入时生成并绑定，防止重名队伍互相覆盖）
 try {
   db.exec('ALTER TABLE projects ADD COLUMN client_id TEXT');

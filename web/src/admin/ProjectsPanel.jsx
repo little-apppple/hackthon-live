@@ -248,6 +248,7 @@ export default function ProjectsPanel({ eventId }) {
                     <div style={{ width: `${Math.round((p.completed_stages / 8) * 100)}%` }} />
                   </div>
                   <span className="mini-num">{Math.round((p.completed_stages / 8) * 100)}%</span>
+                  {typeof p.ai_score === 'number' && <span className="mini-num" title="AI 参考分（满分 85 + 主观 15 待评审）">AI {p.ai_score}</span>}
                 </td>
                 <td>
                   <span className={`status-chip c-${p.archived ? 'archived' : p.revoked ? 'revoked' : p.status}`}>

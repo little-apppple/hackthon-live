@@ -38,7 +38,8 @@ const USAGE = `用法:
 --deploy: 打包并上传到服务端自动部署到预留端口，探活通过后自动上报「上线部署」
 --verify: 探活 + 接口测试 + E2E 全部通过后自动上报「线上验收」（退出码 3 = 验证未通过）
 --loop: 开新一轮迭代（上线后调整需求重走流程，进度重置、loop_count+1、历史留审计）
---submit: 用户本人确认后上报「最终提交」，当前线上版本定格为参赛评分作品`;
+--submit: 用户本人确认后上报「最终提交」，当前线上版本定格为参赛评分作品；提交后自动生成 AI 参考评分并上报
+--score: 单独重算 AI 参考评分（--dry 只算不上报）；--no-score 在 --submit 后跳过自动评分`;
 
 const ONBOARDING = `── 首次使用接入引导（两种模式任选其一）──────────────
 模式 A · 自助注册（推荐，技能包内置上报地址时自动生效）：
@@ -140,6 +141,8 @@ function parseArgs(argv) {
     else if (a === '--submit') args.submit = true;
     else if (a === '--yes') args.yes = true;
     else if (a === '--doctor') args.doctor = true;
+    else if (a === '--score') args.score = true;
+    else if (a === '--no-score') args.noScore = true;
     else if (a === '--force') args.force = true;
     else if (a === '--verify') args.verify = true;
     else if (a === '--deploy') args.deploy = true;
@@ -230,6 +233,7 @@ async function main() {
 
   if (args.next) return cmdNext(args, cfg);
   if (args.loop) return cmdLoop(args, cfg);
+  if (args.score) return cmdScore(args, cfg);
   if (args.submit) return cmdSubmit(args, cfg);
 
   if (args.status) {
@@ -668,6 +672,298 @@ async function cmdDoctor(args) {
   if (failCount > 0) process.exit(1); // 与 setup.js 约定一致：1 = 存在待处理项（⚠ 不算）
 }
 
+// ---------- AI 参考评分（提交后自动计算并上报）----------
+// 设计依据 docs/AI-SCORING.md：机器可判定维度 85 分自动计算、主观项 15 分单列待评审、红线扣分
+// 评分规范文档：优先随技能包下发的副本（离线也可查），其次项目内 docs/AI-SCORING.md
+const SCORE_DOC = fs.existsSync(path.join(__dirname, '..', 'AI-SCORING.md'))
+  ? 'skill/hackathon-reporter/AI-SCORING.md'
+  : 'docs/AI-SCORING.md';
+const SCORE_DOC_BUNDLED = fs.existsSync(path.join(__dirname, '..', 'AI-SCORING.md'));
+
+function readIfExists(rel) {
+  try {
+    return fs.readFileSync(path.resolve(process.cwd(), rel), 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+function git(args) {
+  try {
+    return execSync('git ' + args, { cwd: process.cwd(), stdio: 'pipe', encoding: 'utf-8' }).trim();
+  } catch {
+    return '';
+  }
+}
+
+// 某路径首次提交的时间戳（用于 SDD/TDD 时序判定），无记录返回 null
+function firstCommitTime(target) {
+  const out = git('log --diff-filter=A --format=%at --reverse -- ' + target);
+  const first = out.split(/\r?\n/).find(Boolean);
+  return first ? Number(first) : null;
+}
+
+async function collectScoreEvidence(cfg) {
+  const ev = { dims: {}, redlines: [], notes: [] };
+  const prd = readIfExists('docs/prd.md');
+  const tpl = readIfExists('docs/requirements-template.md');
+  const verifyDoc = readIfExists('docs/verification.md') || readIfExists('docs/verification-notes.md');
+  const reviewDoc =
+    readIfExists('docs/review.md') || readIfExists('docs/review-report.md') || readIfExists('review.md') || '';
+  const scoreDoc = SCORE_DOC_BUNDLED ? SCORE_DOC : readIfExists(SCORE_DOC);
+  let pkg = {};
+  try {
+    pkg = JSON.parse(readIfExists('package.json') || '{}');
+  } catch {
+    /* 忽略 */
+  }
+  const gateCmd = Object.keys(pkg.scripts || {}).find((k) => /^(test|gate)$/.test(k));
+
+  // A. 需求与规格闭环
+  const prdSections = (prd || '').match(/^#{1,3}\s+/gm)?.length || 0;
+  const hasIO = /(数据来源|输入|来源)/.test(prd || '') && /(输出|去向|呈现)/.test(prd || '');
+  ev.dims.A1 = { score: prd ? (prdSections >= 4 ? 5 : 3) : 0, max: 5, evidence: prd ? `docs/prd.md（${prdSections} 个小节）` : '证据缺失：无 docs/prd.md' };
+  ev.dims.A2 = { score: hasIO ? 6 : 0, max: 6, evidence: hasIO ? 'PRD 含输入来源与输出去向' : '证据缺失：PRD 未体现输入来源/输出去向' };
+  const tplFilled = tpl && tpl.replace(/^\s*[#>|-].*$/gm, '').trim().length > 120;
+  ev.dims.A3 = { score: tplFilled ? 5 : 0, max: 5, evidence: tpl ? `docs/requirements-template.md${tplFilled ? '（用户填写非空）' : '（仅模板占位）'}` : '证据缺失：无需求模板文件' };
+  ev.dims.A4 = { score: verifyDoc ? 4 : 0, max: 4, evidence: verifyDoc ? 'docs/verification*.md 存在' : '证据缺失：无数据/接口验证记录' };
+
+  // B. 工程纪律
+  const prdTime = firstCommitTime('docs/prd.md');
+  // 代码首提交：从 git 历史中找最早的代码文件（不绑定目录结构，适配任意项目布局）
+  const earliestFileCommit = (predicate) => {
+    const log = git('log --diff-filter=A --format=%at --name-only --reverse');
+    let ts = null;
+    for (const line of log.split(/\r?\n/)) {
+      const t = line.trim();
+      if (/^\d+$/.test(t)) {
+        ts = Number(t);
+        continue;
+      }
+      if (t && ts !== null && predicate(t)) return ts;
+    }
+    return null;
+  };
+  const isCode = (p) =>
+    /\.(js|jsx|ts|tsx|py|go|java|rb|php|cs|rs|kt|swift|vue|svelte)$/.test(p) &&
+    !/(^|\/)(tests?|__tests__|docs?)\//.test(p) &&
+    !/\.(test|spec)\./.test(p) &&
+    !/(^|\/)(vite|rollup|webpack|eslint|jest|playwright)\.config\./.test(p);
+  const codeTime = earliestFileCommit(isCode);
+  const ts = (t) => (t ? new Date(t * 1000).toISOString().slice(0, 16) : '无');
+  ev.dims.B1 = {
+    score: prdTime && codeTime && prdTime <= codeTime ? 7 : prdTime ? 4 : 0,
+    max: 7,
+    evidence: prdTime ? `PRD 首提交 ${ts(prdTime)}；代码首提交 ${ts(codeTime)}` : '证据缺失：PRD 未提交',
+  };
+  const isTest = (p) =>
+    /(^|\/)(tests?|__tests__)\//.test(p) ||
+    /\.(test|spec)\.[jt]sx?$/.test(p) ||
+    /^scripts\/.*(e2e|smoke|verify).*\.js$/.test(p);
+  const testTime = earliestFileCommit(isTest);
+  const tddLog = readIfExists('docs/tdd-log.md');
+  ev.dims.B2 = {
+    score: tddLog ? 7 : testTime && codeTime && testTime <= codeTime ? 7 : testTime ? 4 : 0,
+    max: 7,
+    evidence: tddLog ? 'docs/tdd-log.md 记录了「先失败后通过」' : testTime ? `测试首提交 ${ts(testTime)}；代码首提交 ${ts(codeTime)}` : '证据缺失：未发现测试文件提交',
+  };
+  const logRaw = git('log --pretty=format:%s%x1f%b%x1e');
+  const commits = logRaw ? logRaw.split('\x1e').filter((c) => c.trim()) : [];
+  const cnSubject = commits.filter((c) => /[\u4e00-\u9fa5]/.test(c.split('\x1f')[0] || '')).length;
+  const withBody = commits.filter((c) => (c.split('\x1f')[1] || '').trim().length > 10).length;
+  const b3 =
+    (commits.length >= 8 ? 2 : commits.length >= 4 ? 1 : 0) +
+    (commits.length && cnSubject / commits.length >= 0.8 ? 2 : 0) +
+    (commits.length && withBody / commits.length >= 0.5 ? 1 : 0);
+  ev.dims.B3 = { score: b3, max: 5, evidence: `提交 ${commits.length} 条；中文主题 ${cnSubject}；含正文说明 ${withBody}` };
+
+  // 服务端审计证据（同时用于 B4/C3/D）
+  let statusBody = null;
+  try {
+    const r = await callApiWithRetry(cfg, '/api/report/status', { headers: authHeader(cfg) });
+    statusBody = r.body;
+  } catch {
+    ev.notes.push('服务端不可达：交付类维度按本地证据降级计分');
+  }
+  const loops = statusBody?.loopCount || 1;
+  ev.dims.B4 = { score: loops >= 2 ? 5 : 3, max: 5, evidence: `loop_count=${loops}${loops < 2 ? '（单轮按基础分 3/5）' : ''}` };
+
+  // C. 测试与质量
+  const testFiles = git('ls-files')
+    .split(/\r?\n/)
+    .filter((p) => /(^|\/)(test|tests|__tests__)\//.test(p) || /\.(test|spec)\.[jt]sx?$/.test(p) || /^scripts\/.*(e2e|smoke|verify).*\.js$/.test(p));
+  let assertions = 0;
+  for (const t of testFiles) {
+    const c = readIfExists(t) || '';
+    assertions += (c.match(/\b(check|assert|expect)\s*\(/g) || []).length;
+  }
+  ev.dims.C1 = {
+    score: testFiles.length >= 2 && assertions >= 20 ? 6 : testFiles.length >= 1 ? 3 : 0,
+    max: 6,
+    evidence: `测试文件 ${testFiles.length} 个，断言/检查点约 ${assertions} 处`,
+  };
+  let e2eCmd = '';
+  try {
+    e2eCmd = JSON.parse(readIfExists('hackathon.config.json') || '{}').verify?.e2e || '';
+  } catch {
+    /* 忽略 */
+  }
+  // 解析 verify.e2e 命令：支持 `npm run X` 别名（读取 package.json 中的实际命令再定位脚本文件）
+  const resolveE2eCmd = (cmd) => {
+    const m = cmd.match(/^npm\s+run\s+(\S+)/);
+    if (m && pkg.scripts?.[m[1]]) return pkg.scripts[m[1]];
+    return cmd;
+  };
+  const e2eResolved = e2eCmd ? resolveE2eCmd(e2eCmd) : '';
+  const e2eScript = e2eResolved
+    ? e2eResolved.split(/\s+/).filter((x) => /\.(js|mjs|cjs|ts|py|sh)$/.test(x)).pop() || ''
+    : '';
+  const e2eOk = !!e2eScript && git('ls-files').includes(e2eScript);
+  ev.dims.C2 = {
+    score: e2eOk ? 5 : e2eCmd ? 3 : 0,
+    max: 5,
+    evidence: e2eCmd ? `verify.e2e = ${e2eCmd}${e2eResolved !== e2eCmd ? ` → ${e2eResolved}` : ''}${e2eOk ? '（脚本存在）' : '（未验证到脚本文件）'}` : '证据缺失：未配置 verify.e2e',
+  };
+  const head = git('rev-parse HEAD');
+  let gate = null;
+  try {
+    gate = JSON.parse(readIfExists('.gate-last-pass.json') || 'null');
+  } catch {
+    /* 忽略 */
+  }
+  const gateFresh = gate && head && gate.commit === head && (gate.totalFailed || 0) === 0;
+  if (gateFresh) {
+    ev.dims.C3 = { score: 6, max: 6, evidence: `闸门证据与 HEAD 一致（${gate.totalPassed} 项断言全绿，${gate.at}）` };
+  } else {
+    // 无闸门证据时实跑项目自带测试命令核验（机器验证，任何项目通用）
+    const testCmd = gateCmd && pkg.scripts?.[gateCmd] ? `npm run ${gateCmd}` : pkg.scripts?.test ? 'npm test' : '';
+    if (!testCmd) {
+      ev.dims.C3 = { score: 0, max: 6, evidence: '证据缺失：package.json 未定义 test/gate 脚本，无法核验回归' };
+    } else {
+      console.log(`→ 运行项目测试命令核验回归：${testCmd}`);
+      const okRun = await Promise.race([
+        runCommand(testCmd, process.cwd(), {}),
+        new Promise((r) => setTimeout(() => r(false), 180000)),
+      ]);
+      ev.dims.C3 = okRun
+        ? { score: 6, max: 6, evidence: `${testCmd} 本地实跑通过（评分时执行）` }
+        : { score: 0, max: 6, evidence: `${testCmd} 本地实跑未通过或超时（180s）——修复后重跑 --score` };
+    }
+    if (gate) ev.notes.push('检测到过期闸门证据：已改为实跑测试命令核验 C3');
+  }
+  const reviewClean = /P0[\s\S]{0,40}?(清零|无|0)/.test(reviewDoc) || /无\s*P0\s*\/?\s*P1/.test(reviewDoc);
+  ev.dims.C4 = {
+    score: reviewDoc && reviewClean ? 5 : reviewDoc ? 3 : 0,
+    max: 5,
+    evidence: reviewDoc ? `独立评审记录存在${reviewClean ? '，标注 P0/P1 清零' : '（未标注清零）'}` : '证据缺失：无独立评审记录',
+  };
+
+  // D. 交付与上线（服务端审计）
+  const stats = statusBody?.stats || {};
+  const submitted = (statusBody?.completedStages || 0) >= TOTAL_STAGES;
+  ev.dims.D1 = { score: submitted ? 5 : (statusBody?.completedStages || 0) >= 6 ? 4 : 0, max: 5, evidence: submitted ? '服务端记录已上线部署' : '未到部署节点' };
+  ev.dims.D2 = { score: submitted ? 6 : 0, max: 6, evidence: submitted ? '服务端验收审计通过（--verify 三关）' : '未完成线上验收' };
+  ev.dims.D3 = { score: (stats.rejects || 0) > 10 ? 2 : 4, max: 4, evidence: `服务端被拒上报 ${stats.rejects || 0} 次` };
+  const cleanRun = (stats.outOfOrder || 0) === 0 && (stats.invalidStage || 0) === 0;
+  ev.dims.D4 = {
+    score: cleanRun ? 4 : (stats.outOfOrder || 0) <= 3 ? 2 : 0,
+    max: 4,
+    evidence: `跳序 ${stats.outOfOrder || 0} 次；非法节点 ${stats.invalidStage || 0} 次`,
+  };
+
+  // 红线
+  const tracked = git('ls-files');
+  const leaked = tracked.split(/\r?\n/).filter((p) => /(^|\/)(\.env|hackathon\.config\.json)$/.test(p));
+  if (leaked.length) ev.redlines.push({ id: 'R1', deduct: 10, detail: `凭据文件进入 git：${leaked.join(', ')}` });
+  const oo = stats.outOfOrder || 0;
+  if (oo > 0) ev.redlines.push({ id: 'R2', deduct: Math.min(5, oo), detail: `跳节点/乱序上报 ${oo} 次` });
+  if ((stats.rateLimited || 0) > 10) ev.redlines.push({ id: 'R3', deduct: 3, detail: `触发限频 ${stats.rateLimited} 次（疑似刷上报）` });
+
+  const dimSum = Object.values(ev.dims).reduce((s, d) => s + d.score, 0);
+  const deduct = ev.redlines.reduce((s, r) => s + r.deduct, 0);
+  ev.autoTotal = Math.max(0, Math.min(85, dimSum - deduct));
+  ev.subjective = [
+    { id: 'E1', max: 6, note: '需求与实现一致性（待评审）' },
+    { id: 'E2', max: 5, note: '开箱可体验（待评审）' },
+    { id: 'E3', max: 4, note: '完成度与创新性（待评审）' },
+  ];
+  ev.rubric = scoreDoc ? 'docs/AI-SCORING.md' : '内置 v1';
+  return ev;
+}
+
+function renderScoreReport(ev) {
+  const lines = [];
+  lines.push('# AI 参考评分报告（自动生成）');
+  lines.push('');
+  lines.push(`生成时间：${new Date().toISOString().slice(0, 19).replace('T', ' ')}`);
+  lines.push(`评分规范：${ev.rubric}（机器可判定 85 分 + 主观项 15 分单列）`);
+  lines.push('');
+  lines.push(`## 自动总分：${ev.autoTotal} / 85`);
+  lines.push('');
+  lines.push('| 维度 | 得分 | 满分 | 证据 |');
+  lines.push('|---|---|---|---|');
+  for (const [k, d] of Object.entries(ev.dims)) lines.push(`| ${k} | ${d.score} | ${d.max} | ${d.evidence} |`);
+  lines.push('');
+  if (ev.redlines.length) {
+    lines.push('## 红线扣分');
+    lines.push('');
+    for (const r of ev.redlines) lines.push(`- ${r.id} −${r.deduct}：${r.detail}`);
+    lines.push('');
+  }
+  lines.push('## 主观项（待评审，不计入自动分）');
+  lines.push('');
+  for (const s of ev.subjective) lines.push(`- ${s.id}（满分 ${s.max}）：${s.note}`);
+  if (ev.notes.length) {
+    lines.push('');
+    lines.push('## 说明');
+    lines.push('');
+    for (const n of ev.notes) lines.push(`- ${n}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+async function cmdScore(args, cfg) {
+  console.log('== AI 参考评分（提交后自动计算）==');
+  const st = await callApiWithRetry(cfg, '/api/report/status', { headers: authHeader(cfg) }).catch(() => null);
+  if (st?.status === 200 && st.body && st.body.completedStages < TOTAL_STAGES) {
+    console.error(`✗ 尚未完成最终提交（当前 ${st.body.completedStages}/${TOTAL_STAGES}），评分在提交后自动进行。`);
+    process.exit(1);
+  }
+  const ev = await collectScoreEvidence(cfg);
+  const report = renderScoreReport(ev);
+  try {
+    const dir = path.resolve(process.cwd(), 'docs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'ai-score.md'), report, 'utf-8');
+    fs.writeFileSync(path.join(dir, 'ai-score.json'), JSON.stringify(ev, null, 2), 'utf-8');
+    console.log('✓ 评分报告已生成: docs/ai-score.md');
+  } catch (e) {
+    console.warn(`⚠ 报告落盘失败（不影响上报）: ${e.message}`);
+  }
+  for (const [k, d] of Object.entries(ev.dims)) console.log(`  ${d.score}/${d.max}  ${k}  ${d.evidence}`);
+  for (const r of ev.redlines) console.log(`  −${r.deduct}  红线 ${r.id}: ${r.detail}`);
+  console.log(`  —— 自动总分 ${ev.autoTotal}/85（主观项 15 分待评审）`);
+
+  if (args.dry) {
+    console.log('（--dry：仅本地计算，未上报）');
+    return;
+  }
+  try {
+    const { status, body } = await callApiWithRetry(cfg, '/api/score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeader(cfg) },
+      body: JSON.stringify({ accessKey: cfg.accessKey, score: ev.autoTotal, detail: ev }),
+    });
+    if (status === 200 && body?.ok) {
+      console.log(`✓ AI 参考分已上报（${body.score}/85，主观项待评委评审）`);
+      return;
+    }
+    printApiError(status, body);
+  } catch {
+    networkError();
+  }
+}
+
 // ---------- 迭代与最终提交 ----------
 
 async function confirm(question) {
@@ -784,6 +1080,13 @@ async function cmdSubmit(args, cfg) {
     }
     if (status === 200 && body?.ok) {
       console.log('✓ 最终提交完成！当前线上版本即为参赛评分作品。');
+      // 提交后自动跑一次 AI 参考评分并上报（--no-score 可跳过）
+      if (!args.noScore) {
+        console.log('');
+        await cmdScore({ ...args, submitFlow: true }, cfg);
+      } else {
+        console.log('  （已按 --no-score 跳过 AI 参考评分）');
+      }
       process.exit(0);
     }
     printApiError(status, body);

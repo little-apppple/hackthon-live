@@ -81,6 +81,17 @@ function runSuite(name, args, { env = {}, cwd = ROOT } = {}) {
   const totalPassed = results.reduce((s, r) => s + (r.passed || 0), 0);
   const totalFailed = results.reduce((s, r) => s + (r.failed || 0), 0);
   const bad = results.filter((r) => !r.ok);
+  // 回归证据落盘：AI 评分据此判定「全量回归通过」（含 commit 与断言数，防止用旧证据顶替）
+  try {
+    const commit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout?.trim() || '';
+    fs.writeFileSync(
+      path.join(ROOT, '.gate-last-pass.json'),
+      JSON.stringify({ at: new Date().toISOString(), commit, suites: results, totalPassed, totalFailed }, null, 2),
+      'utf8'
+    );
+  } catch {
+    /* 证据写入失败不影响闸门结论 */
+  }
   console.log(`\n== 闸门结果：${results.length - bad.length}/${results.length} 套件通过，共 ${totalPassed} 项断言，${totalFailed} 项失败 ==`);
   if (bad.length) console.log(`未通过：${bad.map((r) => r.name).join('、')}`);
   fs.rmSync(TMP, { recursive: true, force: true });

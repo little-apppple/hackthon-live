@@ -22,6 +22,11 @@ export default function SubmittedList({ items }) {
               <div className="submitted-meta">
                 {p.department} · {p.grp}
                 <span className="submitted-time">{String(p.last_report_at || '').slice(11, 16)}</span>
+                {typeof p.ai_score === 'number' && (
+                  <span className="submitted-score" title="AI 参考分（机器可判定 85 分 + 主观项 15 分待评委评审）">
+                    AI {p.ai_score}
+                  </span>
+                )}
               </div>
             </div>
             {p.link && (

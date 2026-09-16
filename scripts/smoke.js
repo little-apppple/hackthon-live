@@ -466,6 +466,40 @@ async function api(method, path, body, useAuth = true) {
     check('安全测试数据已清理', true);
   }
 
+  console.log(`\n== 14. AI 参考评分上报 ==`);
+  {
+    // 未提交时不允许上报评分（key1 在上一节已完成提交，故新建项目验证门槛）
+    const fresh = await api('POST', '/api/admin/projects', { groupId: groupIds[0], name: '评分门槛校验项目' });
+    const blocked = await api('POST', '/api/score', { accessKey: fresh.data.accessKey, score: 70, detail: {} }, false);
+    check('未最终提交时评分被拒 409', blocked.status === 409 && blocked.data.code === 'SCORE_NOT_ALLOWED', JSON.stringify(blocked.data));
+
+    const invalid = await api('POST', '/api/score', { accessKey: fresh.data.accessKey, score: 'abc' }, false);
+    check('非法分数 400', invalid.status === 400 && invalid.data.code === 'INVALID_SCORE');
+    const noKey = await api('POST', '/api/score', { score: 70 }, false);
+    check('缺 accessKey 400', noKey.status === 400 && noKey.data.code === 'INVALID_KEY');
+
+    // key1 已提交：正常上报并落库
+    const payload = { version: 'v1', dims: { A1: { score: 5, max: 5, evidence: 'docs/prd.md' }, B1: { score: 7, max: 7, evidence: 'git log' } }, autoTotal: 12, redlines: [] };
+    const scored = await api('POST', '/api/score', { accessKey: key1, score: 66, detail: payload }, false);
+    check('提交后评分上报成功', scored.status === 200 && scored.data.ok && scored.data.score === 66, JSON.stringify(scored.data));
+
+    const got = await fetch(base + '/api/score', { headers: { 'x-access-key': key1 } });
+    const gotBody = await got.json();
+    check('评分可通过请求头查询（含明细）', got.status === 200 && gotBody.score === 66 && gotBody.detail?.dims?.A1?.score === 5, JSON.stringify(gotBody).slice(0, 140));
+
+    const statusWithScore = await fetch(base + '/api/report/status', { headers: { 'x-access-key': key1 } });
+    const swBody = await statusWithScore.json();
+    check('status 返回参考分与过程审计统计', swBody.score === 66 && typeof swBody.stats?.rejects === 'number', JSON.stringify(swBody.stats));
+
+    const feed = await api('GET', '/api/snapshot', undefined, false);
+    check('评分写入审计流', feed.data.snapshot?.events?.some((e) => e.stage === 'score' && e.ok));
+
+    // 清理
+    await api('POST', `/api/admin/projects/${fresh.data.id}/archive`);
+    await api('DELETE', `/api/admin/projects/${fresh.data.id}`);
+    check('评分门槛校验项目已清理', true);
+  }
+
   console.log(`\n结果: ${passed} 通过, ${failed} 失败`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => {

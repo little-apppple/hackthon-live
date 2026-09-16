@@ -121,7 +121,7 @@ function buildSnapshot(eventId) {
   // 已提交（最终参赛作品）列表：按提交时间倒序，供大屏「已完成项目列表」与烟花通知使用
   const submittedProjects = db
     .prepare(
-      `SELECT p.id AS projectId, p.name, p.loop_count, p.port, p.last_report_at,
+      `SELECT p.id AS projectId, p.name, p.loop_count, p.port, p.last_report_at, p.ai_score, p.ai_scored_at,
               g.name AS grp, d.name AS department
          FROM projects p
          JOIN groups g ON g.id = p.group_id
