@@ -6,14 +6,14 @@
 // audience：面向现场观众的通俗说法（悬停/副文案展示，不改节点语义）
 // verified：该节点是否由服务端机器验证（部署/验收），用于区分「自报」与「已验证」
 const STAGES = [
-  { index: 1, id: 'requirements', name: '需求分析', audience: '有想法了', weight: 5, verified: false },
-  { index: 2, id: 'design', name: '方案设计', audience: '方案定了', weight: 5, verified: false },
-  { index: 3, id: 'prototype', name: '原型设计', audience: '有样子了', weight: 5, verified: false },
-  { index: 4, id: 'coding', name: '代码开发', audience: '在写代码', weight: 30, verified: false },
-  { index: 5, id: 'testing', name: '本地测试', audience: '在自测', weight: 15, verified: false },
-  { index: 6, id: 'deployment', name: '上线部署', audience: '能玩了', weight: 15, verified: true },
-  { index: 7, id: 'acceptance', name: '线上验收', audience: '机器验过', weight: 15, verified: true },
-  { index: 8, id: 'submission', name: '最终提交', audience: '定稿提交', weight: 10, verified: true },
+  { index: 1, id: 'requirements', name: '需求分析', audience: '有想法了', weight: 5, verified: false, verifyLabel: '小组自报' },
+  { index: 2, id: 'design', name: '方案设计', audience: '方案定了', weight: 5, verified: false, verifyLabel: '小组自报' },
+  { index: 3, id: 'prototype', name: '原型设计', audience: '有样子了', weight: 5, verified: false, verifyLabel: '小组自报' },
+  { index: 4, id: 'coding', name: '代码开发', audience: '在写代码', weight: 30, verified: false, verifyLabel: '小组自报' },
+  { index: 5, id: 'testing', name: '本地测试', audience: '在自测', weight: 15, verified: false, verifyLabel: '小组自报' },
+  { index: 6, id: 'deployment', name: '上线部署', audience: '能玩了', weight: 15, verified: true, verifyLabel: '服务端探活' },
+  { index: 7, id: 'acceptance', name: '线上验收', audience: '机器验过', weight: 15, verified: true, verifyLabel: '自动化验收' },
+  { index: 8, id: 'submission', name: '最终提交', audience: '定稿提交', weight: 10, verified: true, verifyLabel: '用户确认' },
 ];
 
 const DEPLOY_STAGE_INDEX = 6; // 上线部署完成即开放链接
@@ -54,14 +54,9 @@ function progressPercent(completedStages) {
   return sum;
 }
 
-// 项目可选跳过「原型设计」（安装包/CLI 类项目不涉及）：显示层用于标注该节点不适用
-function isStageSkipped(stageId, deliverable) {
-  return deliverable === 'package' && stageId === 'prototype';
-}
 
 module.exports = {
   STAGES,
-  isStageSkipped,
   DEPLOY_STAGE_INDEX,
   DONE_STAGE_INDEX,
   LOOP_MIN_STAGE_INDEX,

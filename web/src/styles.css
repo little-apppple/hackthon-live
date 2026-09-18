@@ -573,7 +573,10 @@ a { color: var(--txt-bright); text-decoration: none; transition: all 0.2s ease; 
 .pc-dot.done:not(.verified) { background: transparent; border: 2px solid var(--red); box-shadow: none; }
 /* 服务端验证节点（部署/验收/提交）：实心 + 微光 */
 .pc-dot.done.verified { box-shadow: 0 0 12px rgba(194, 59, 34, 0.9); }
-.pc-dot.skipped { background: transparent; border: 1px dashed rgba(122, 122, 122, 0.5); }
+/* 不适用的节点：琥珀虚线（避免与灰色 todo 混淆） */
+.pc-dot.skipped { background: transparent; border: 1.5px dashed var(--amber, #ffb200); opacity: 0.75; }
+/* 已上报但服务端未验证（如部署探活未通过）：实心无光晕 */
+.pc-dot.done.unverified { background: rgba(194, 59, 34, 0.55); box-shadow: none; }
 .pc-playable {
   flex-shrink: 0; font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px;
   color: var(--white); border: 1px solid rgba(44, 255, 86, 0.5); background: rgba(44, 255, 86, 0.1);

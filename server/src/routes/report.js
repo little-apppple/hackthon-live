@@ -363,7 +363,9 @@ router.post('/register', aw(async (req, res) => {
   if (!createdNow) {
     // 同一客户端重注册：允许更新展示信息（改成员/补简介等），不影响名称与密钥
     if (clientId && project.client_id === clientId) {
-      const fields = ['members', 'summary', 'value', 'features', 'scenario'].filter((k) => info[k]);
+      // deliverable 也允许修正（声明错了可重跑 --init --deliverable web|package）
+    const fields = ['members', 'summary', 'value', 'features', 'scenario'].filter((k) => info[k]);
+    if (deliverable && deliverable !== project.deliverable && !project.artifact_name) fields.push('deliverable');
       if (fields.length) {
         db.prepare(`UPDATE projects SET ${fields.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now','localtime') WHERE id = ?`)
           .run(...fields.map((k) => info[k]), project.id);
@@ -446,6 +448,7 @@ router.post('/loop', aw(async (req, res) => {
   db.prepare(
     `UPDATE projects
         SET loop_count = ?, completed_stages = 0, status = 'active',
+            last_report_at = datetime('now','localtime'),
             updated_at = datetime('now','localtime')
       WHERE id = ? AND revoked = 0 AND archived = 0`
   ).run(newLoop, project.id);
@@ -643,7 +646,10 @@ router.get('/hits', (req, res) => {
 // CLI 活动心跳：--next / --status / 上报都会经过这里，用于大屏显示「最近活动」（不需要队伍手工维护）
 function touchSeen(projectId) {
   try {
-    db.prepare("UPDATE projects SET last_seen_at = datetime('now','localtime') WHERE id = ?").run(projectId);
+    // 一分钟内不重复写（CLI 重试循环不会白写 WAL）
+    db.prepare(
+      "UPDATE projects SET last_seen_at = datetime('now','localtime') WHERE id = ? AND (last_seen_at IS NULL OR last_seen_at < datetime('now','localtime','-1 minute'))"
+    ).run(projectId);
   } catch {
     /* 心跳失败不影响主流程 */
   }

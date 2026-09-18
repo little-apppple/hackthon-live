@@ -34,8 +34,15 @@ export default function ProjectCard({ project, stages, serverTime, onOpenDetail 
   const seenMin = minutesSince(project.lastSeenAt, serverTime);
   const nextStage = stageNames.find((x) => x.index === project.completed_stages + 1);
   const audience = (nextStage || {}).audience || AUDIENCE_FALLBACK[(nextStage || {}).id];
-  const playable = !revoked && project.completed_stages >= 6;
-  const stale = stalledMin !== null && stalledMin >= 30 && status === 'active';
+  const hasTarget = !!(project.link || project.artifactUrl);
+  const linkReadyCalc = !revoked && project.completed_stages >= 6 && !!project.link;
+  const playable = !revoked && project.completed_stages >= 6 && hasTarget;
+  // 停滞判定覆盖所有非终态（含 loading 未上报、deployed 卡在验收前）
+  const terminal = status === 'done' || status === 'submitted' || status === 'revoked';
+  const stale = stalledMin !== null && stalledMin >= 30 && !terminal;
+  // 阶段索引取自服务端 stages，避免硬编码 6 漂移
+  const deployIdx = (stageNames.find((x) => x.id === 'deployment') || {}).index || 6;
+  const skippedList = project.skippedStages || [];
 
   return (
     <div
@@ -58,14 +65,28 @@ export default function ProjectCard({ project, stages, serverTime, onOpenDetail 
         {stageNames.map((s, i) => {
           const idx = i + 1;
           const base = idx <= project.completed_stages ? 'done' : idx === project.completed_stages + 1 ? 'current' : 'todo';
-          const skipped = isPackage && s.id === 'prototype';
-          const cls = skipped ? 'skipped' : base === 'done' && s.verified ? 'done verified' : base;
+          const notApplicable = skippedList.includes(s.id) && base === 'todo';
+          const probeFailed = s.id === 'deployment' && base === 'done' && project.deployProbeOk === false;
+          const cls = notApplicable
+            ? 'skipped'
+            : probeFailed
+              ? 'done unverified'
+              : base === 'done' && s.verified
+                ? 'done verified'
+                : base;
           return (
             <React.Fragment key={s.id}>
               {i > 0 && <span className={`pc-link ${idx <= project.completed_stages ? 'l-done' : ''}`} />}
               <span
                 className={`pc-dot ${cls}`}
-                title={`${s.index}. ${s.name}${s.audience ? ` · ${s.audience}` : ''}${s.verified ? '（服务端验证）' : '（小组自报）'}${skipped ? ' · 该项目类型不涉及' : ''}`}
+                title={[
+                  `${s.index}. ${s.name}`,
+                  s.audience ? `· ${s.audience}` : '',
+                  `（${s.verifyLabel || (s.verified ? '机器校验' : '小组自报')}）`,
+                  s.id === 'deployment' && project.deployProbeOk === false ? '⚠ 最近一次部署服务端探活未通过' : '',
+                  base === 'done' && skippedList.includes(s.id) ? '· 该项目类型不涉及（已完成上报）' : '',
+                  notApplicable ? '· 该项目类型不涉及' : '',
+                ].filter(Boolean).join(' ')}
               />
             </React.Fragment>
           );

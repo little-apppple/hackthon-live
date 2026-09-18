@@ -203,7 +203,7 @@ if (columnsOf('departments').length > 0 && !columnsOf('departments').includes('e
     db.exec(`INSERT INTO groups (id, event_id, department_id, name, sort_order, created_at) SELECT id, ${eid}, department_id, name, sort_order, created_at FROM groups__old`);
     // 动态拷贝：旧表实际存在的列（含 hits/loop_count/client_id 等新增列）都要带上，否则新列值会被默认值覆盖
     const baseCols = ['id', 'group_id', 'name', 'description', 'access_key', 'port', 'completed_stages', 'status', 'revoked', 'archived', 'last_report_at', 'created_at', 'updated_at'];
-    const extraCols = ['loop_count', 'client_id', 'hits', 'deliverable', 'artifact_name', 'members', 'summary', 'value', 'features', 'scenario', 'ai_score', 'ai_score_detail', 'ai_scored_at'];
+    const extraCols = ['loop_count', 'client_id', 'hits', 'deliverable', 'artifact_name', 'members', 'summary', 'value', 'features', 'scenario', 'ai_score', 'ai_score_detail', 'ai_scored_at', 'last_seen_at'];
     const oldCols = new Set(columnsOf('projects__old'));
     const copyCols = [...baseCols, ...extraCols.filter((c) => oldCols.has(c))];
     db.exec(`INSERT INTO projects (event_id, ${copyCols.join(', ')})

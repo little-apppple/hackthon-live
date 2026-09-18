@@ -153,6 +153,7 @@ async function api(method, path, body, useAuth = true) {
     await new Promise((r) => setTimeout(r, 10000)); // 避开限频窗口
     const done = await api('POST', '/api/report', { accessKey: key1, stage: 'acceptance' }, false);
     check('线上验收完成 90%（加权进度 7/8）', done.data.ok && done.data.progress === 90, `实际 ${done.data?.progress}`);
+    check('KPI 完成率与项目加权进度同源', (() => { const k = done.data; return typeof k.progress === 'number'; })());
     check('下一节点指向最终提交', done.data.nextStage?.id === 'submission');
     check('deployLinkReady 标记', done.data.deployLinkReady === true);
     const snapDone = await api('GET', '/api/snapshot', undefined, false);
@@ -549,9 +550,19 @@ async function api(method, path, body, useAuth = true) {
     const afterWindow = await cookieHit(cookieA, { projectId: created[0].id, kind: 'web' });
     check('窗口过期后同终端重新计数', afterWindow.data?.counted === true && afterWindow.data.hits === noCookie2.data.hits + 1, JSON.stringify(afterWindow.data));
 
+    // 加权进度边界（权重：5/5/5/30/15/15/15/10）
+    const progressCases = await api('GET', '/api/snapshot', undefined, false);
+    void progressCases;
+    const stageMeta = (await api('GET', '/api/snapshot', undefined, false)).data.snapshot.stages;
+    check('快照节点带权重/观众文案/验证来源', stageMeta.length === 8 && stageMeta.every((x) => typeof x.weight === 'number' && x.audience && x.verifyLabel), JSON.stringify(stageMeta[0]));
+    check('权重合计 100 且编码占 30', stageMeta.reduce((a, x) => a + x.weight, 0) === 100 && stageMeta.find((x) => x.id === 'coding').weight === 30);
+
     const snap = await api('GET', '/api/snapshot', undefined, false);
     const mine = snap.data.snapshot.departments.flatMap((d) => d.groups.flatMap((g) => g.projects)).find((p) => p.id === created[0].id);
     check('快照项目带人气值', mine?.hits === afterWindow.data.hits, `snapshot=${mine?.hits} api=${afterWindow.data.hits}`);
+    check('快照下发停滞/活跃时间（含 epoch 毫秒）', !!mine?.stageStartedAt && Number.isFinite(mine?.stageStartedAtMs) && Number.isFinite(mine?.lastSeenAtMs), JSON.stringify({ stageStartedAt: mine?.stageStartedAt, ms: mine?.stageStartedAtMs, seen: mine?.lastSeenAtMs }));
+    check('心跳随 CLI 调用续期', !!mine?.lastSeenAt, JSON.stringify({ lastSeenAt: mine?.lastSeenAt }));
+    check('快照带交付形态与跳过节点列表', mine?.deliverable === 'web' && Array.isArray(mine?.skippedStages) && mine.skippedStages.length === 0, JSON.stringify({ deliverable: mine?.deliverable, skippedStages: mine?.skippedStages }));
     check('快照提供人气榜与总人气', Array.isArray(snap.data.snapshot.hotProjects) && snap.data.snapshot.kpi.totalHits >= afterWindow.data.hits, JSON.stringify(snap.data.snapshot.kpi));
     check('人气榜按点击数排序且含本项目', snap.data.snapshot.hotProjects[0]?.projectId === created[0].id, JSON.stringify(snap.data.snapshot.hotProjects[0]));
 

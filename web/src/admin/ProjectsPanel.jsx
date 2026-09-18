@@ -251,9 +251,9 @@ export default function ProjectsPanel({ eventId }) {
                 <td className="mono">{p.port}</td>
                 <td>
                   <div className="mini-bar">
-                    <div style={{ width: `${Math.round((p.completed_stages / 8) * 100)}%` }} />
+                    <div style={{ width: `${p.progress ?? 0}%` }} />
                   </div>
-                  <span className="mini-num">{Math.round((p.completed_stages / 8) * 100)}%</span>
+                  <span className="mini-num">{p.progress ?? 0}%</span>
                   {typeof p.ai_score === 'number' && <span className="mini-num" title="AI 参考分（满分 85 + 主观 15 待评审）">AI {p.ai_score}</span>}
                   {p.hits > 0 && <span className="mini-num" title="人气值（按终端去重）">人气 {p.hits}</span>}
                 </td>

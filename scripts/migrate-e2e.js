@@ -34,12 +34,12 @@ const db = new DatabaseSync(${JSON.stringify(file)});
 db.exec(\`CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, end_time TEXT, is_active INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))\`);
 db.exec(\`CREATE TABLE departments (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), UNIQUE(name))\`);
 db.exec(\`CREATE TABLE groups (id INTEGER PRIMARY KEY AUTOINCREMENT, department_id INTEGER NOT NULL, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), UNIQUE(department_id, name))\`);
-db.exec(\`CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', access_key TEXT NOT NULL UNIQUE, port INTEGER NOT NULL, completed_stages INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'loading', revoked INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, last_report_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), hits INTEGER NOT NULL DEFAULT 0, loop_count INTEGER NOT NULL DEFAULT 1)\`);
+db.exec(\`CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', access_key TEXT NOT NULL UNIQUE, port INTEGER NOT NULL, completed_stages INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'loading', revoked INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, last_report_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), hits INTEGER NOT NULL DEFAULT 0, loop_count INTEGER NOT NULL DEFAULT 1, deliverable TEXT NOT NULL DEFAULT 'web', artifact_name TEXT, last_seen_at TEXT)\`);
 db.exec(\`CREATE TABLE reports (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, stage TEXT, ok INTEGER NOT NULL, reject_code TEXT, message TEXT NOT NULL DEFAULT '', ip TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), evidence TEXT)\`);
 db.prepare('INSERT INTO departments (id, name) VALUES (1, ?)').run('legacy 部门');
 db.prepare('INSERT INTO groups (id, department_id, name) VALUES (1, 1, ?)').run('legacy 小组');
-db.prepare('INSERT INTO projects (id, group_id, name, access_key, port, completed_stages, status, hits, loop_count) VALUES (1, 1, ?, ?, 4700, 6, ?, 77, 3)')
-  .run('legacy 项目', 'hk_' + 'a'.repeat(32), 'deployed');
+db.prepare('INSERT INTO projects (id, group_id, name, access_key, port, completed_stages, status, hits, loop_count, deliverable, artifact_name, last_seen_at) VALUES (1, 1, ?, ?, 4700, 6, ?, 77, 3, ?, ?, ?)')
+  .run('legacy 项目', 'hk_' + 'a'.repeat(32), 'deployed', 'package', 'legacy-setup.exe', '2026-09-01 10:00:00');
 db.prepare('INSERT INTO reports (project_id, stage, ok, message, evidence) VALUES (1, ?, 1, ?, ?)').run('deployment', '旧库上报', '{"old":true}');
 db.close();
 console.log('legacy db built');
@@ -81,6 +81,10 @@ console.log('legacy db built');
     check('迁移后快照可用（不因缺列 500）', snap.status === 200 && snapBody?.ok, `HTTP ${snap.status} ${JSON.stringify(snapBody).slice(0, 160)}`);
     check('旧库已有活动并被识别', snapBody?.snapshot?.eventName === 'legacy 活动' || !!snapBody?.snapshot?.eventId, JSON.stringify({ eventName: snapBody?.snapshot?.eventName }));
     check('迁移保留既有数据（项目 + 人气值）', snapBody?.snapshot?.kpi?.totalHits === 77, JSON.stringify(snapBody?.snapshot?.kpi));
+    const legacyProj = snapBody?.snapshot?.departments.flatMap((d) => d.groups.flatMap((g) => g.projects))[0];
+    check('迁移保留交付形态与包名', legacyProj?.deliverable === 'package' && legacyProj?.artifact_name === 'legacy-setup.exe', JSON.stringify({ deliverable: legacyProj?.deliverable, artifact: legacyProj?.artifact_name }));
+    check('迁移保留心跳时间', !!legacyProj?.lastSeenAt, JSON.stringify({ lastSeenAt: legacyProj?.lastSeenAt }));
+    check('迁移后加权进度正确（6 节点=75%）', legacyProj?.progress === 75, JSON.stringify({ progress: legacyProj?.progress }));
 
     const login = await fetch(BASE + '/api/admin/login', {
       method: 'POST',

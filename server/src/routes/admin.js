@@ -8,7 +8,7 @@ const { createSession, destroySession, isAuthed, requireAuth } = require('../aut
 const { allocatePort, poolSummary, setPoolRange } = require('../ports');
 const deployer = require('../deployer');
 const { notifyRefresh } = require('../sse');
-const { STAGES } = require('../stages');
+const { STAGES, progressPercent } = require('../stages');
 
 const router = express.Router();
 
@@ -333,7 +333,9 @@ router.get('/projects', (req, res) => {
         ORDER BY p.archived, d.sort_order, d.id, g.sort_order, g.id, p.id`
     )
     .all(eventId);
-  res.json({ ok: true, eventId, projects: rows });
+  // 进度按加权口径下发，与管理端/大屏保持一致（避免后台仍用「阶段数/8」）
+  const withProgress = rows.map((r) => ({ ...r, progress: progressPercent(r.completed_stages) }));
+  res.json({ ok: true, eventId, projects: withProgress });
 });
 
 // 创建项目：一个事务内生成 accesskey + 分配预留端口（端口池跨活动全局唯一）
