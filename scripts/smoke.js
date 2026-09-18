@@ -276,8 +276,14 @@ async function api(method, path, body, useAuth = true) {
       JSON.stringify(inRange.data)
     );
 
-    // 10.5 区间耗尽报错
-    const full = await api('PUT', '/api/admin/ports', { start: 4100, end: 4101 });
+    // 10.5 区间被已预留端口占满仍可保存（只影响新分配）
+    // 起止取本套件实际预留的两个端口：4100 等可能被宿主机常驻服务的部署应用占用，
+    // 分配器试绑定会顺延，硬编码 4100-4101 会撞机器端口噪音
+    const reservedPorts = [created[0].port, inRange.data.port];
+    const full = await api('PUT', '/api/admin/ports', {
+      start: Math.min(...reservedPorts),
+      end: Math.max(...reservedPorts),
+    });
     check('区间被占满仍可保存（只影响新分配）', full.data.ok);
 
     // 10.6 恢复默认区间并清理

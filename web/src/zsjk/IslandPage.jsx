@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import ZsjkShell, { ZsjkBoot } from './ZsjkShell.jsx';
 import { useSnapshot } from '../useSnapshot.js';
 import ProjectDetail from '../dashboard/ProjectDetail.jsx';
-import { aggregateIslands, splitMembers } from './model.js';
+import { aggregateIslands, orderIslands, splitMembers } from './model.js';
 
 // 岛屿详情：顶栏(88) + 列表(836，thead 54 固定 / tbody 内滚)，预算 88+16+836+ticker76 = 1016
 // 入口 /zsjk/island?unit=<deptId>；非法参数回退全部；行点击开 ProjectDetail 弹窗
@@ -15,7 +15,7 @@ export default function IslandPage() {
 
   if (!snapshot) return <ZsjkBoot />;
   const stages = snapshot.stages;
-  const islands = aggregateIslands(snapshot.departments);
+  const islands = orderIslands(aggregateIslands(snapshot.departments));
   const rawUnit = params.get('unit');
   const unit = Number(rawUnit);
   const active = islands.find((i) => String(i.id) === rawUnit && Number.isFinite(unit)) || null;

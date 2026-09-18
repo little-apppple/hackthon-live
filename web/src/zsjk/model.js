@@ -79,6 +79,39 @@ export function peopleKpis(people) {
   };
 }
 
+// 岛院分组与顺序（固定口径，来源：赛事发布图 2026-09）：业务岛 4 座 + 职能岛 2 座
+// 名单中出现配置之外的岛院时，地图归入「其他岛院」组、排序排在已知岛之后，保证注册新建岛院仍可见
+export const ISLAND_GROUPS = [
+  { name: '业务岛', islands: ['交规院岛', '道路院岛', '隧交院岛', '景观院岛'] },
+  { name: '职能岛', islands: ['管理支撑岛', '技术经营岛'] },
+];
+export const ISLAND_ORDER = ISLAND_GROUPS.flatMap((g) => g.islands);
+
+// 岛院列表 → [{name:'业务岛', islands:[...]}, ...]；组内顺序 = 发布图顺序，缺岛不出空组
+export function groupIslands(islands) {
+  const byName = new Map((islands || []).map((i) => [i.name, i]));
+  const used = new Set();
+  const groups = ISLAND_GROUPS.map((g) => {
+    const members = g.islands.map((n) => byName.get(n)).filter(Boolean);
+    for (const m of members) used.add(m.name);
+    return { name: g.name, islands: members };
+  });
+  const rest = (islands || []).filter((i) => !used.has(i.name));
+  if (rest.length > 0) groups.push({ name: '其他岛院', islands: rest });
+  return groups.filter((g) => g.islands.length > 0);
+}
+
+// 展示顺序：发布图固定顺序优先（详情页下拉/列表用），未知岛院排在其后、稳定按 id
+export function orderIslands(islands) {
+  const rank = new Map(ISLAND_ORDER.map((n, i) => [n, i]));
+  return [...(islands || [])].sort((a, b) => {
+    const ra = rank.has(a.name) ? rank.get(a.name) : ISLAND_ORDER.length;
+    const rb = rank.has(b.name) ? rank.get(b.name) : ISLAND_ORDER.length;
+    if (ra !== rb) return ra - rb;
+    return (a.id || 0) - (b.id || 0);
+  });
+}
+
 const PEOPLE_KEYS = {
   projectCount: (p) => p.projectCount,
   hits: (p) => p.hits,

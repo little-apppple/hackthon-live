@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import * as echarts from 'echarts';
 import ZsjkShell, { ZsjkBoot } from './ZsjkShell.jsx';
 import { useSnapshot } from '../useSnapshot.js';
-import { aggregateIslands } from './model.js';
+import { aggregateIslands, groupIslands } from './model.js';
 
 // 作战地图：标题(150) + 岛院卡 3 列(488) + 三图(254)，预算 150+24+488+24+254+ticker76 = 1016
 // 右上角「实时同步」开关：localStorage 持久化；关闭 → 岛卡/图表置灰、ticker 停止
@@ -20,6 +20,7 @@ export default function MapPage() {
 
   if (!snapshot) return <ZsjkBoot />;
   const islands = aggregateIslands(snapshot.departments);
+  const islandGroups = groupIslands(islands);
   const totalProjects = islands.reduce((s, i) => s + i.projectCount, 0);
 
   return (
@@ -45,40 +46,50 @@ export default function MapPage() {
         </div>
       </div>
 
-      <div className={`zk-islands zk-dimmable ${syncOn ? 'on' : ''}`} key={syncOn ? 'on' : 'off'}>
-        {islands.map((island, i) => (
-          <div
-            className="zk-island"
-            key={island.id}
-            style={{ '--i': i }}
-            onClick={() => navigate(`/zsjk/island?unit=${island.id}`)}
-            title="点击进入岛屿详情"
-          >
-            <div className="zk-island-name">{island.name}</div>
-            <div className="zk-island-nums">
-              <div>
-                <span className="zk-mlabel">立项数</span>
-                <span className="zk-inum">
-                  {island.projectCount}
-                  <small> 个</small>
-                </span>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <span className="zk-mlabel">进度值</span>
-                <span className={`zk-inum ${island.progress >= 100 ? 'is-red' : ''}`}>
-                  {island.progress}
-                  <small>%</small>
-                </span>
-              </div>
+      <div className={`zk-island-groups zk-dimmable ${syncOn ? 'on' : ''}`} key={syncOn ? 'on' : 'off'}>
+        {islandGroups.map((group, gi) => (
+          <section className={`zk-island-group ${group.name === '业务岛' ? 'is-biz' : 'is-rest'}`} key={group.name}>
+            <div className="zk-group-label">
+              {group.name}
+              <span>{group.islands.length} 座</span>
             </div>
-            <div className="zk-island-bar">
-              <i style={{ width: `${island.progress}%` }} />
+            <div className={`zk-group-grid ${group.islands.length <= 2 && group.name !== '业务岛' ? 'is-col' : ''}`}>
+              {group.islands.map((island, i) => (
+                <div
+                  className="zk-island"
+                  key={island.id}
+                  style={{ '--i': gi * 4 + i }}
+                  onClick={() => navigate(`/zsjk/island?unit=${island.id}`)}
+                  title="点击进入岛屿详情"
+                >
+                  <div className="zk-island-name">{island.name}</div>
+                  <div className="zk-island-nums">
+                    <div>
+                      <span className="zk-mlabel">立项数</span>
+                      <span className="zk-inum">
+                        {island.projectCount}
+                        <small> 个</small>
+                      </span>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span className="zk-mlabel">进度值</span>
+                      <span className={`zk-inum ${island.progress >= 100 ? 'is-red' : ''}`}>
+                        {island.progress}
+                        <small>%</small>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="zk-island-bar">
+                    <i style={{ width: `${island.progress}%` }} />
+                  </div>
+                  <div className="zk-island-hits">
+                    🔥 人气值
+                    <b>{island.hits}</b>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="zk-island-hits">
-              🔥 人气值
-              <b>{island.hits}</b>
-            </div>
-          </div>
+          </section>
         ))}
       </div>
 

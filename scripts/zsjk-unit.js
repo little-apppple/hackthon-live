@@ -162,6 +162,59 @@ function dept(id, name, progress, groups) {
     assert.strictEqual(byHitsDesc[0].hits, 30);
   });
 
+  console.log('== 六岛固定分组与顺序（业务岛/职能岛）==');
+  const sixIslands = ['道路院岛', '交规院岛', '景观院岛', '隧交院岛', '技术经营岛', '管理支撑岛'].map(
+    (name, i) => ({ id: 100 + i, name, projectCount: 1, progress: 0, hits: 0, projects: [] })
+  );
+  await t('分组配置固定：业务岛 4 岛 + 职能岛 2 岛，成员按发布图顺序', () => {
+    assert.deepStrictEqual(
+      m.ISLAND_GROUPS.map((g) => g.name),
+      ['业务岛', '职能岛']
+    );
+    assert.deepStrictEqual(m.ISLAND_GROUPS[0].islands, ['交规院岛', '道路院岛', '隧交院岛', '景观院岛']);
+    assert.deepStrictEqual(m.ISLAND_GROUPS[1].islands, ['管理支撑岛', '技术经营岛']);
+  });
+  await t('groupIslands：六岛按组归位，组内顺序 = 发布图顺序（与数据序无关）', () => {
+    const groups = m.groupIslands(sixIslands);
+    assert.deepStrictEqual(
+      groups.map((g) => [g.name, g.islands.map((i) => i.name)]),
+      [
+        ['业务岛', ['交规院岛', '道路院岛', '隧交院岛', '景观院岛']],
+        ['职能岛', ['管理支撑岛', '技术经营岛']],
+      ]
+    );
+  });
+  await t('groupIslands：名单外的岛院归入「其他岛院」追加在末尾（保持数据序）', () => {
+    const withExtra = [...sixIslands, { id: 200, name: '客串院岛', projectCount: 0, progress: 0, hits: 0, projects: [] }];
+    const groups = m.groupIslands(withExtra);
+    assert.strictEqual(groups.length, 3);
+    assert.deepStrictEqual(groups[2].name, '其他岛院');
+    assert.deepStrictEqual(groups[2].islands.map((i) => i.name), ['客串院岛']);
+  });
+  await t('groupIslands：缺岛不出空组，空数据返回空数组', () => {
+    const partial = m.groupIslands(sixIslands.slice(0, 1));
+    assert.deepStrictEqual(partial.map((g) => g.name), ['业务岛']);
+    assert.deepStrictEqual(m.groupIslands([]), []);
+  });
+  await t('orderIslands：按发布图顺序重排，名单外岛院排在已知岛之后（稳定按 id）', () => {
+    const ordered = m.orderIslands(sixIslands);
+    assert.deepStrictEqual(ordered.map((i) => i.name), [
+      '交规院岛', '道路院岛', '隧交院岛', '景观院岛', '管理支撑岛', '技术经营岛',
+    ]);
+    const withIds = [
+      { id: 9, name: '客串院岛' },
+      { id: 2, name: '道路院岛' },
+      { id: 8, name: '另一院岛' },
+      { id: 1, name: '交规院岛' },
+    ];
+    assert.deepStrictEqual(m.orderIslands(withIds).map((i) => [i.name, i.id]), [
+      ['交规院岛', 1],
+      ['道路院岛', 2],
+      ['另一院岛', 8],
+      ['客串院岛', 9],
+    ]);
+  });
+
   console.log(`结果: ${passed} 通过, ${failed} 失败`);
   if (failed) {
     console.log(failures.join('\n'));
