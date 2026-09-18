@@ -3,6 +3,7 @@
 //   node scripts/gate.js   （等价 npm test / npm run gate）
 // 套件：smoke（API 冒烟，需外部服务实例，本脚本自动拉起）
 //      → verify-e2e（验收自动化）→ deploy-e2e（自动部署）→ skill-e2e（技能包全旅程）
+//      → migrate-e2e（旧库迁移）→ zsjk-unit（zsjk 大屏聚合纯函数）
 // 说明：smoke 内置 10 秒限频等待，故整套约需 4-6 分钟。
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
@@ -80,6 +81,7 @@ function runSuite(name, args, { env = {}, cwd = ROOT } = {}) {
   runSuite('deploy-e2e', ['scripts/deploy-e2e.js']);
   runSuite('skill-e2e', ['scripts/skill-e2e.js']);
   runSuite('migrate-e2e', ['scripts/migrate-e2e.js']);
+  runSuite('zsjk-unit', ['scripts/zsjk-unit.js']);
 
   const totalPassed = results.reduce((s, r) => s + (r.passed || 0), 0);
   const totalFailed = results.reduce((s, r) => s + (r.failed || 0), 0);
