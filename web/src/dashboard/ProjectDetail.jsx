@@ -1,5 +1,4 @@
 import React, { useEffect } from 'react';
-import { reportHit } from '../hit.js';
 
 // 项目详情弹层：展示注册时采集的信息（参与人员/需求简述/价值/功能/场景）与交付形态
 // 点击项目卡或已提交榜项打开；点击遮罩或按 Esc 关闭
@@ -58,12 +57,12 @@ export default function ProjectDetail({ project, stages, onClose }) {
 
         <div className="detail-actions">
           {project.artifactUrl && (
-            <a className="detail-link" href={project.artifactUrl} target="_blank" rel="noreferrer" onClick={() => reportHit(project.projectId || project.id, 'package')}>
+            <a className="detail-link" href={project.artifactUrl} target="_blank" rel="noreferrer" >
               ⬇ 下载安装包
             </a>
           )}
           {!isPackage && project.link && project.completed_stages >= 6 && (
-            <a className="detail-link" href={project.link} target="_blank" rel="noreferrer" onClick={() => reportHit(project.projectId || project.id, 'web')}>
+            <a className="detail-link" href={`/api/hit/go?projectId=${project.projectId || project.id}`} target="_blank" rel="noreferrer">
               ▶ 打开项目
             </a>
           )}

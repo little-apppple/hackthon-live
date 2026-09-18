@@ -104,6 +104,8 @@ node skill/vibecoding-workflow/scripts/setup.js --project <目录>  # 面向其�
 | `DEPLOY_PATH_PREPEND` | - | 部署进程 PATH 前置目录（如 /opt/node22/bin） |
 | `DEPLOY_ROOT` | server/data/deploys | 自动部署产物与运行目录 |
 | `DEPLOY_MAX_MB` | 200 | 部署产物大小上限（解包后大小/文件数同样受配额限制） |
+| `HIT_RATE_PER_TERMINAL` | 30 | 每终端每分钟人气上报上限 |
+| `HIT_RATE_PER_IP` | 600 | 每 IP 每分钟人气上报上限（仅限频，不用于去重） |
 | `HIT_WINDOW_MS` | 60000 | 人气去重窗口（同终端同项目重复点击只计一次） |
 | `REGISTER_RATE_LIMIT_PER_MIN` | 10 | 自助注册每 IP 每分钟上限 |
 | `DEPLOY_RATE_LIMIT_MS` | 10000 | 同一项目两次部署的最小间隔（自动部署防刷） |
@@ -129,7 +131,14 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 
 评委/观众在大屏点击「▶ 打开项目」或「⬇ 下载安装包」时，前端上报一次点击，形成项目**人气值**。
 
-- **去重口径**：同一终端对同一项目，在 `HIT_WINDOW_MS`（默认 60 秒）内的多次点击只计一次——终端标识由浏览器 localStorage 生成（`t_xxx`），请求未带标识时回退「IP + User-Agent」哈希；
+**终端身份（IP 不参与去重）**：同一公网 IP 下常有多个终端（会场 wifi / NAT），用 IP 去重会把不同人并成一个人，因此采用三级级联：
+
+1. **服务端签发的 Cookie `hk_term`**（首选）：每个浏览器实例一个随机标识，随请求自动携带，不依赖 JS，一年有效；
+2. **请求体 `terminal`**（兼容老客户端，同样需 `t_` 前缀）；
+3. **都没有时当场签发新的随机终端**——所以无 Cookie 的客户端（curl 等）每次都会被当作新终端，**IP 只用于限频，不用于去重**。
+
+- **去重口径**：同一终端对同一项目，在 `HIT_WINDOW_MS`（默认 60 秒）内的多次点击只计一次；
+- **点击入口**：大屏按钮指向同源端点 `GET /api/hit/go?projectId=N`——服务端计数后 302 跳到真实地址，**禁用 JS 或直接点链也会计数**；
 - **展示**：项目卡显示「人气 n」、右侧**人气榜**（前 5 名 + 进度条 + 全部项目合计）、管理端项目表同步显示；快照 `kpi.totalHits` 为全场人气合计；
 - **存储**：`projects.hits` 冗余计数（读快照即可，无需聚合）；明细在 `hit_events` 表（仅用于窗口去重，定期清理超过窗口 10 倍或 1 小时以上的记录）；
 - **限频**：每 IP 每分钟 60 次上报，超出返回 429（静默失败不影响跳转）。
@@ -192,7 +201,8 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 | POST | `/api/report` | 上报节点完成 `{accessKey, stage, message, evidence?}` |
 | POST | `/api/register` | 自助注册：`{department, group, project, clientId, registerToken, description?}` → 录入名单+预留端口+发 accessKey；**以 clientId 幂等**（同一 clientId 重跑返回同一 key，换名亦然）；不同 clientId 撞同名 → 409 `NAME_TAKEN`。需本期注册令牌（管理员 `/api/admin/register-token` 签发）；错误码 `INVALID_PARAMS` / `INVALID_CLIENT_ID` / `REGISTER_TOKEN_INVALID` / `NAME_TAKEN` / `NO_FREE_PORT` / `PORT_CONFLICT`，每 IP 限频 10 次/分钟（按直连 IP 计，勿置于无 realip 配置的反向代理之后） |
 | POST | `/api/deploy?type=package&file=<包名>` | 非 Web 应用：上传安装包（raw body），服务端在预留端口发布下载链接（落地页 + 附件下载），下载可用即视为部署完成 |
-| POST | `/api/hit` | 人气上报：`{projectId, terminal, kind}`——**同一终端 + 同一项目在 `HIT_WINDOW_MS`（默认 60 秒）内只计一次**；终端标识由前端 localStorage 生成，缺失时回退 IP+UA；每 IP 限频 60 次/分 |
+| POST | `/api/hit` | 人气上报（JS 可选路径）：`{projectId, terminal?, kind?}`——按「终端 + 项目 + `HIT_WINDOW_MS`」去重；终端取 Cookie `hk_term` 或请求体，缺失时当场签发；每终端 30 次/分、每 IP 600 次/分限频 |
+| GET | `/api/hit/go?projectId=` | 人气 + 跳转：计数后 302 到项目线上地址（安装包交付则直达安装包），不依赖前端 JS |
 | GET | `/api/hits` | 查询人气值：带 `x-access-key` 返回单项目，否则返回当前活动人气前 20 |
 | POST | `/api/score` | AI 参考评分上报（**仅最终提交后**）：`{accessKey, score(0-100), detail}`，参数错误 `INVALID_SCORE`(400)/未提交 `SCORE_NOT_ALLOWED`(409)；评分规范见 docs/AI-SCORING.md |
 | GET | `/api/score` | 查询已存档的参考分与明细（`x-access-key` 请求头） |

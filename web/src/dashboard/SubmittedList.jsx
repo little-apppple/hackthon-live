@@ -1,5 +1,4 @@
 import React from 'react';
-import { reportHit } from '../hit.js';
 
 // 已提交作品列表：项目完成最终提交后进入此榜，按提交时间倒序
 export default function SubmittedList({ items, onOpenDetail }) {
@@ -34,14 +33,11 @@ export default function SubmittedList({ items, onOpenDetail }) {
             {(p.artifactUrl || p.link) && (
               <a
                 className="submitted-link"
-                href={p.artifactUrl || p.link}
+                href={`/api/hit/go?projectId=${p.projectId}`}
                 target="_blank"
                 rel="noreferrer"
                 title={p.artifactUrl || p.link}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  reportHit(p.projectId, p.deliverable === 'package' ? 'package' : 'web');
-                }}
+                onClick={(e) => e.stopPropagation()}
               >
                 {p.deliverable === 'package' ? '下载' : '打开'}
               </a>

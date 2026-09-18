@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { reportHit } from '../hit.js';
 
 const STATUS_TEXT = {
   loading: '等待启动',
@@ -69,14 +68,11 @@ export default function ProjectCard({ project, stages, onOpenDetail }) {
         {linkReady && !isPackage && (
           <a
             className="pc-link-btn"
-            href={project.link}
+            href={`/api/hit/go?projectId=${project.id}`}
             target="_blank"
             rel="noreferrer"
             title={project.link}
-            onClick={(e) => {
-              e.stopPropagation();
-              reportHit(project.id, 'web');
-            }}
+            onClick={(e) => e.stopPropagation()}
           >
             ▶ 打开项目
           </a>
@@ -84,14 +80,11 @@ export default function ProjectCard({ project, stages, onOpenDetail }) {
         {project.deliverable === 'package' && project.artifactUrl && project.completed_stages >= 6 && !revoked && (
           <a
             className="pc-link-btn"
-            href={project.artifactUrl}
+            href={`/api/hit/go?projectId=${project.id}`}
             target="_blank"
             rel="noreferrer"
             title={project.artifactUrl}
-            onClick={(e) => {
-              e.stopPropagation();
-              reportHit(project.id, 'package');
-            }}
+            onClick={(e) => e.stopPropagation()}
           >
             ⬇ 下载安装包
           </a>

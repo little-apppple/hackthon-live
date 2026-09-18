@@ -7,6 +7,7 @@ const { stageByRef, stageByIndex, deriveStatus, progressPercent, DEPLOY_STAGE_IN
 const { notifyRefresh } = require('../sse');
 const { allocatePort, probeLocalPort } = require('../ports');
 const { getActiveEvent } = require('../events');
+const { parseCookies } = require('../auth');
 
 const router = express.Router();
 
@@ -499,16 +500,48 @@ router.post('/bind-client', (req, res) => {
   });
 });
 
+// 人气计数核心：按 (项目, 终端, 时间窗) 去重，返回是否计入与最新计数
+function countHit(projectId, terminal, kind) {
+  const now = Date.now();
+  const last = db
+    .prepare('SELECT ts FROM hit_events WHERE project_id = ? AND terminal = ? ORDER BY ts DESC LIMIT 1')
+    .get(projectId, terminal);
+  if (last && now - last.ts < config.hitWindowMs) {
+    return { counted: false, hits: db.prepare('SELECT hits FROM projects WHERE id = ?').get(projectId)?.hits ?? 0 };
+  }
+  db.transaction(() => {
+    db.prepare('INSERT INTO hit_events (project_id, terminal, kind, ts) VALUES (?, ?, ?, ?)').run(projectId, terminal, kind, now);
+    db.prepare("UPDATE projects SET hits = hits + 1, updated_at = datetime('now','localtime') WHERE id = ?").run(projectId);
+  })();
+  const hits = db.prepare('SELECT hits FROM projects WHERE id = ?').get(projectId)?.hits ?? 0;
+  return { counted: true, hits };
+}
+
+// 终端 Cookie（HttpOnly；每浏览器实例一个，一年有效）
+function setTerminalCookie(res, terminal) {
+  res.setHeader('Set-Cookie', `hk_term=${terminal}; HttpOnly; Path=/; SameSite=Lax; Max-Age=31536000`);
+}
+
+// 校验项目可用于计数（存在、未归档、未吊销、属于当前活动），返回 { project } 或 { error }
+function hitTarget(projectId) {
+  const project = db.prepare('SELECT id, revoked, archived, event_id, port, deliverable, artifact_name FROM projects WHERE id = ?').get(projectId);
+  const active = getActiveEvent();
+  if (!project || project.archived || project.event_id !== active.id) return { error: 404, code: 'INVALID_PROJECT', message: '项目不存在' };
+  if (project.revoked) return { error: 403, code: 'KEY_REVOKED', message: '该项目已被吊销，不计人气' };
+  return { project };
+}
+
 // 人气值：点击上报（大屏上点击「打开项目」或「下载安装包」时触发）
 // 去重规则：同一终端对同一项目，在 hitWindowMs（默认 60 秒）内的多次点击只计一次
 router.post('/hit', (req, res) => {
   const ip = req.ip || '';
-  const rawTerminal = String(req.body?.terminal ?? '').trim().slice(0, 64);
-  // 前端生成的终端标识形如 t_xxx；不合法则视为缺失（下方回退 IP+UA），避免用任意串批量刷人气
-  const terminalOk = /^t_[a-z0-9_]{6,40}$/.test(rawTerminal); // 允许下划线（部分客户端生成器会带）
-  const terminal = terminalOk
-    ? rawTerminal
-    : `ip:${crypto.createHash('sha256').update(`${ip}|${req.headers['user-agent'] || ''}`).digest('hex').slice(0, 32)}`;
+  // 终端标识：Cookie（每浏览器实例一个）→ 请求体（兼容）→ 新签发随机终端。
+  // IP 只用于限频，**不参与去重**——同一公网 IP 下多终端（会场 wifi/NAT）必须各算一次。
+  const cookieTerminal = parseCookies(req).hk_term;
+  const bodyTerminal = String(req.body?.terminal ?? '').trim().slice(0, 64);
+  const given = [cookieTerminal, bodyTerminal].find((v) => /^t_[a-z0-9_]{6,40}$/.test(v || ''));
+  const terminal = given || `t_${crypto.randomBytes(12).toString('hex')}`;
+  if (!given) setTerminalCookie(res, terminal); // 首次访问即签发，后续请求自动携带
   if (overBudget(`t:${terminal}`, config.hitRatePerTerminal) || overBudget(`ip:${ip}`, config.hitRatePerIp)) {
     return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: '点击上报过于频繁' });
   }
@@ -517,35 +550,46 @@ router.post('/hit', (req, res) => {
     return res.status(400).json({ ok: false, code: 'INVALID_PROJECT', error: '缺少有效的 projectId' });
   }
   const kind = req.body?.kind === 'package' ? 'package' : 'web';
-  const project = db.prepare('SELECT id, revoked, archived, event_id FROM projects WHERE id = ?').get(projectId);
-  const active = getActiveEvent();
-  if (!project || project.archived || project.event_id !== active.id) {
-    return res.status(404).json({ ok: false, code: 'INVALID_PROJECT', error: '项目不存在' });
-  }
-  if (project.revoked) {
-    // 被吊销的项目不再累计人气（与人气榜口径一致）
-    return res.status(403).json({ ok: false, code: 'KEY_REVOKED', error: '该项目已被吊销，不计人气' });
-  }
+  const target = hitTarget(projectId);
+  if (target.error) return res.status(target.error).json({ ok: false, code: target.code, error: target.message });
 
-  const now = Date.now();
-  const last = db
-    .prepare('SELECT ts FROM hit_events WHERE project_id = ? AND terminal = ? ORDER BY ts DESC LIMIT 1')
-    .get(projectId, terminal);
-  if (last && now - last.ts < config.hitWindowMs) {
-    const hits = db.prepare('SELECT hits FROM projects WHERE id = ?').get(projectId)?.hits ?? 0;
-    return res.json({ ok: true, counted: false, hits, windowMs: config.hitWindowMs });
-  }
-
-  db.transaction(() => {
-    db.prepare('INSERT INTO hit_events (project_id, terminal, kind, ts) VALUES (?, ?, ?, ?)').run(projectId, terminal, kind, now);
-    db.prepare("UPDATE projects SET hits = hits + 1, updated_at = datetime('now','localtime') WHERE id = ?").run(projectId);
-  })();
-  const hits = db.prepare('SELECT hits FROM projects WHERE id = ?').get(projectId)?.hits ?? 0;
-  if (Date.now() - lastHitNotifyAt > 2000) {
+  const { counted, hits } = countHit(projectId, terminal, kind);
+  if (counted && Date.now() - lastHitNotifyAt > 2000) {
     lastHitNotifyAt = Date.now();
     notifyRefresh('hit');
   }
-  res.json({ ok: true, counted: true, hits, windowMs: config.hitWindowMs });
+  res.json({ ok: true, counted, hits, windowMs: config.hitWindowMs });
+});
+
+// 人气 + 跳转：大屏按钮直接指向本端点，服务端计数后 302 到真实地址。
+// 好处：不依赖前端 JS（禁用 JS / 直接点链也会计数），且同源请求自动携带终端 Cookie。
+router.get('/hit/go', (req, res) => {
+  const projectId = Number(req.query.projectId);
+  if (!Number.isInteger(projectId) || projectId <= 0) {
+    return res.status(400).json({ ok: false, code: 'INVALID_PROJECT', error: '缺少有效的 projectId' });
+  }
+  const ip = req.ip || '';
+  const cookieTerminal = parseCookies(req).hk_term;
+  const given = /^t_[a-z0-9_]{6,40}$/.test(cookieTerminal || '') ? cookieTerminal : '';
+  const terminal = given || `t_${crypto.randomBytes(12).toString('hex')}`;
+  if (!given) setTerminalCookie(res, terminal);
+
+  const target = hitTarget(projectId);
+  if (target.error) return res.status(target.error).json({ ok: false, code: target.code, error: target.message });
+  const project = target.project;
+  const isPkg = project.deliverable === 'package' && project.artifact_name;
+  const dest = isPkg
+    ? `http://${config.publicHost}:${project.port}/${encodeURIComponent(project.artifact_name)}`
+    : `http://${config.publicHost}:${project.port}`;
+
+  if (!overBudget(`t:${terminal}`, config.hitRatePerTerminal) && !overBudget(`ip:${ip}`, config.hitRatePerIp)) {
+    const { counted } = countHit(projectId, terminal, isPkg ? 'package' : 'web');
+    if (counted && Date.now() - lastHitNotifyAt > 2000) {
+      lastHitNotifyAt = Date.now();
+      notifyRefresh('hit');
+    }
+  }
+  res.redirect(302, dest);
 });
 
 // 查询人气值（大屏/后台/CLI 复用）
