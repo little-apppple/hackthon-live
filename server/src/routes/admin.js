@@ -322,7 +322,7 @@ router.get('/projects', (req, res) => {
   const eventId = resolveEventId(req);
   const rows = db
     .prepare(
-      `SELECT p.id, p.name, p.description, p.port, p.access_key, p.completed_stages, p.loop_count, p.client_id, p.ai_score, p.members, p.summary, p.value, p.features, p.scenario, p.deliverable, p.artifact_name, p.status,
+      `SELECT p.id, p.name, p.description, p.port, p.access_key, p.completed_stages, p.loop_count, p.client_id, p.ai_score, p.hits, p.members, p.summary, p.value, p.features, p.scenario, p.deliverable, p.artifact_name, p.status,
               p.revoked, p.archived, p.last_report_at, p.created_at,
               g.name AS group_name, g.id AS group_id, d.name AS department_name, d.id AS department_id
          FROM projects p

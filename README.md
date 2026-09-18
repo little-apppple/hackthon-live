@@ -104,6 +104,7 @@ node skill/vibecoding-workflow/scripts/setup.js --project <目录>  # 面向其�
 | `DEPLOY_PATH_PREPEND` | - | 部署进程 PATH 前置目录（如 /opt/node22/bin） |
 | `DEPLOY_ROOT` | server/data/deploys | 自动部署产物与运行目录 |
 | `DEPLOY_MAX_MB` | 200 | 部署产物大小上限（解包后大小/文件数同样受配额限制） |
+| `HIT_WINDOW_MS` | 60000 | 人气去重窗口（同终端同项目重复点击只计一次） |
 | `REGISTER_RATE_LIMIT_PER_MIN` | 10 | 自助注册每 IP 每分钟上限 |
 | `DEPLOY_RATE_LIMIT_MS` | 10000 | 同一项目两次部署的最小间隔（自动部署防刷） |
 | `DEPLOY_START_TIMEOUT_MS` | 60000 | 部署启动探活超时 |
@@ -123,6 +124,15 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 5. **自动部署（上线部署节点）**：小组 Agent 执行 `node report.js --deploy`——自动打包上传（排除 node_modules/.git），服务端解压到 `data/deploys/<项目ID>/`、按需 `npm install`、以预留端口启动（或托管静态站），60 秒内探活通过后**自动上报「上线部署」**并点亮大屏链接。崩溃自动重启（最多 10 次）；服务重启后只恢复**当前活动**的部署进程。
 6. **线上验收（自动化）**：小组 Agent 执行 `node report.js --verify`——依次完成**线上应用探活 → 接口测试（`verify.api`）→ E2E 测试（`verify.e2e`）**，全部通过后自动上报验收并附证据；任一步失败则不上报（退出码 3），修复后重试。
 7. **监管**：后台可查看各项目部署进程状态、停止/启动/重启；可随时吊销/恢复 accesskey、归档项目（归档自动停服并释放端口）；所有上报（含被拒）与部署/验收证据都有审计记录。
+
+## 人气值（点击统计）
+
+评委/观众在大屏点击「▶ 打开项目」或「⬇ 下载安装包」时，前端上报一次点击，形成项目**人气值**。
+
+- **去重口径**：同一终端对同一项目，在 `HIT_WINDOW_MS`（默认 60 秒）内的多次点击只计一次——终端标识由浏览器 localStorage 生成（`t_xxx`），请求未带标识时回退「IP + User-Agent」哈希；
+- **展示**：项目卡显示「人气 n」、右侧**人气榜**（前 5 名 + 进度条 + 全部项目合计）、管理端项目表同步显示；快照 `kpi.totalHits` 为全场人气合计；
+- **存储**：`projects.hits` 冗余计数（读快照即可，无需聚合）；明细在 `hit_events` 表（仅用于窗口去重，定期清理超过窗口 10 倍或 1 小时以上的记录）；
+- **限频**：每 IP 每分钟 60 次上报，超出返回 429（静默失败不影响跳转）。
 
 ## 交付形态与注册信息
 
@@ -182,6 +192,8 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 | POST | `/api/report` | 上报节点完成 `{accessKey, stage, message, evidence?}` |
 | POST | `/api/register` | 自助注册：`{department, group, project, clientId, registerToken, description?}` → 录入名单+预留端口+发 accessKey；**以 clientId 幂等**（同一 clientId 重跑返回同一 key，换名亦然）；不同 clientId 撞同名 → 409 `NAME_TAKEN`。需本期注册令牌（管理员 `/api/admin/register-token` 签发）；错误码 `INVALID_PARAMS` / `INVALID_CLIENT_ID` / `REGISTER_TOKEN_INVALID` / `NAME_TAKEN` / `NO_FREE_PORT` / `PORT_CONFLICT`，每 IP 限频 10 次/分钟（按直连 IP 计，勿置于无 realip 配置的反向代理之后） |
 | POST | `/api/deploy?type=package&file=<包名>` | 非 Web 应用：上传安装包（raw body），服务端在预留端口发布下载链接（落地页 + 附件下载），下载可用即视为部署完成 |
+| POST | `/api/hit` | 人气上报：`{projectId, terminal, kind}`——**同一终端 + 同一项目在 `HIT_WINDOW_MS`（默认 60 秒）内只计一次**；终端标识由前端 localStorage 生成，缺失时回退 IP+UA；每 IP 限频 60 次/分 |
+| GET | `/api/hits` | 查询人气值：带 `x-access-key` 返回单项目，否则返回当前活动人气前 20 |
 | POST | `/api/score` | AI 参考评分上报（**仅最终提交后**）：`{accessKey, score(0-100), detail}`，参数错误 `INVALID_SCORE`(400)/未提交 `SCORE_NOT_ALLOWED`(409)；评分规范见 docs/AI-SCORING.md |
 | GET | `/api/score` | 查询已存档的参考分与明细（`x-access-key` 请求头） |
 | POST | `/api/bind-client` | 手工发 key 模式绑定客户端：`{accessKey, clientId}`；首次绑定成功、同 clientId 幂等、他人已绑定 → 409 `CLIENT_MISMATCH` |

@@ -255,6 +255,7 @@ export default function ProjectsPanel({ eventId }) {
                   </div>
                   <span className="mini-num">{Math.round((p.completed_stages / 8) * 100)}%</span>
                   {typeof p.ai_score === 'number' && <span className="mini-num" title="AI 参考分（满分 85 + 主观 15 待评审）">AI {p.ai_score}</span>}
+                  {p.hits > 0 && <span className="mini-num" title="人气值（按终端去重）">人气 {p.hits}</span>}
                 </td>
                 <td>
                   <span className={`status-chip c-${p.archived ? 'archived' : p.revoked ? 'revoked' : p.status}`}>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { reportHit } from '../hit.js';
 
 // 已提交作品列表：项目完成最终提交后进入此榜，按提交时间倒序
 export default function SubmittedList({ items, onOpenDetail }) {
@@ -22,6 +23,7 @@ export default function SubmittedList({ items, onOpenDetail }) {
               <div className="submitted-meta">
                 {p.department} · {p.grp}
                 <span className="submitted-time">{String(p.last_report_at || '').slice(11, 16)}</span>
+                {typeof p.hits === 'number' && p.hits > 0 && <span className="submitted-hits">人气 {p.hits}</span>}
                 {typeof p.ai_score === 'number' && (
                   <span className="submitted-score" title="AI 参考分（机器可判定 85 分 + 主观项 15 分待评委评审）">
                     AI {p.ai_score}
@@ -36,7 +38,10 @@ export default function SubmittedList({ items, onOpenDetail }) {
                 target="_blank"
                 rel="noreferrer"
                 title={p.artifactUrl || p.link}
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  reportHit(p.projectId, p.deliverable === 'package' ? 'package' : 'web');
+                }}
               >
                 {p.deliverable === 'package' ? '下载' : '打开'}
               </a>

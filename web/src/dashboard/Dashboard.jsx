@@ -6,6 +6,7 @@ import DeptGrid from './DeptGrid.jsx';
 import Spotlight from './Spotlight.jsx';
 import EventFeed from './EventFeed.jsx';
 import SubmittedList from './SubmittedList.jsx';
+import HotList from './HotList.jsx';
 import NotificationCenter from './NotificationCenter.jsx';
 import ProjectDetail from './ProjectDetail.jsx';
 
@@ -59,6 +60,7 @@ export default function Dashboard() {
           </main>
           <aside className="dash-side">
             <Spotlight loadingProjects={snapshot.loadingProjects} />
+            <HotList items={snapshot.hotProjects} totalHits={snapshot.kpi?.totalHits} />
             <SubmittedList items={snapshot.submittedProjects} onOpenDetail={setDetail} />
             <EventFeed events={snapshot.events} />
           </aside>

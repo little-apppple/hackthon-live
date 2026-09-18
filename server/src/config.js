@@ -18,6 +18,7 @@ const config = {
   eventEndTime: process.env.EVENT_END_TIME || '',
   rateLimitMs: intEnv('RATE_LIMIT_MS', 10000),
   registerRateLimitPerMin: intEnv('REGISTER_RATE_LIMIT_PER_MIN', 10),
+  hitWindowMs: intEnv('HIT_WINDOW_MS', 60000), // 单终端对单项目的人气去重窗口
   deployRateLimitMs: intEnv('DEPLOY_RATE_LIMIT_MS', 10000),
   sessionTtlMs: intEnv('SESSION_TTL_MS', 24 * 3600 * 1000),
   dbPath: process.env.DB_PATH || path.join(__dirname, '..', 'data', 'hackathon.db'),

@@ -508,7 +508,48 @@ async function api(method, path, body, useAuth = true) {
     check('评分门槛校验项目已清理', true);
   }
 
-  console.log(`\n结果: ${passed} 通过, ${failed} 失败`);
+  console.log(`\n== 15. 人气值（点击统计与去重）==`);
+  {
+    // 窗口由 HIT_WINDOW_MS 配置（gate/smoke 场景下服务端设为 1000ms 便于验证过期）
+    const hit = (body) => api('POST', '/api/hit', body, false);
+    const me = (await api('GET', '/api/admin/projects')).data.projects.find((p) => p.id === created[0].id);
+
+    const bad = await hit({ projectId: 'abc' });
+    check('非法 projectId 400', bad.status === 400 && bad.data.code === 'INVALID_PROJECT');
+    const missing = await hit({ projectId: 999999, terminal: 't1' });
+    check('不存在的项目 404', missing.status === 404);
+
+    const t1 = `t_smoke_${Date.now()}`;
+    const h1 = await hit({ projectId: created[0].id, terminal: t1, kind: 'web' });
+    check('首次点击计入人气', h1.data.ok && h1.data.counted === true && h1.data.hits >= 1, JSON.stringify(h1.data));
+    const h2 = await hit({ projectId: created[0].id, terminal: t1, kind: 'web' });
+    check('同终端窗口内重复点击不计数', h2.data.ok && h2.data.counted === false && h2.data.hits === h1.data.hits, JSON.stringify(h2.data));
+    const h3 = await hit({ projectId: created[0].id, terminal: `${t1}_other`, kind: 'package' });
+    check('不同终端点击分别计数', h3.data.ok && h3.data.counted === true && h3.data.hits === h1.data.hits + 1, JSON.stringify(h3.data));
+    const noTerminal = await hit({ projectId: created[0].id, kind: 'web' });
+    const noTerminal2 = await hit({ projectId: created[0].id, kind: 'web' });
+    check('缺终端标识时按 IP+UA 回退去重', noTerminal.data.counted === true && noTerminal2.data.counted === false, JSON.stringify(noTerminal2.data));
+
+    await new Promise((r) => setTimeout(r, 1200)); // 超过去重窗口
+    const h4 = await hit({ projectId: created[0].id, terminal: t1, kind: 'web' });
+    check('窗口过期后再次点击重新计数', h4.data.ok && h4.data.counted === true && h4.data.hits === noTerminal2.data.hits + 1, JSON.stringify(h4.data));
+
+    const snap = await api('GET', '/api/snapshot', undefined, false);
+    const mine = snap.data.snapshot.departments.flatMap((d) => d.groups.flatMap((g) => g.projects)).find((p) => p.id === created[0].id);
+    check('快照项目带人气值', mine?.hits === h4.data.hits, `snapshot=${mine?.hits} api=${h4.data.hits}`);
+    check('快照提供人气榜与总人气', Array.isArray(snap.data.snapshot.hotProjects) && snap.data.snapshot.kpi.totalHits >= h4.data.hits, JSON.stringify(snap.data.snapshot.kpi));
+    check('人气榜按点击数排序且含本项目', snap.data.snapshot.hotProjects[0]?.projectId === created[0].id, JSON.stringify(snap.data.snapshot.hotProjects[0]));
+
+    const byKey = await fetch(base + '/api/hits', { headers: { 'x-access-key': key1 } });
+    const byKeyBody = await byKey.json();
+    check('按 accessKey 查询人气值', byKey.status === 200 && typeof byKeyBody.hits === 'number', JSON.stringify(byKeyBody));
+    const meAfter = (await api('GET', '/api/admin/projects')).data.projects.find((p) => p.id === created[0].id);
+    check('管理端项目列表带人气值', typeof meAfter.hits === 'number' && meAfter.hits === h4.data.hits, `admin=${meAfter.hits} api=${h4.data.hits}`);
+  }
+
+
+  console.log(`
+结果: ${passed} 通过, ${failed} 失败`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => {
   console.error('测试脚本异常:', e);

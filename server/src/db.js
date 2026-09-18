@@ -118,7 +118,16 @@ const SCHEMA = {
 )`,
 };
 
+const TABLES_EXTRA = `CREATE TABLE IF NOT EXISTS hit_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  terminal TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'web',
+  ts INTEGER NOT NULL
+)`;
+
 const INDEXES = `
+CREATE INDEX IF NOT EXISTS idx_hit_events_lookup ON hit_events(project_id, terminal, ts DESC);
 -- 端口唯一性只约束未归档行：归档后端口即回到可分配池（跨活动全局唯一，绑定真实监听）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_port_active ON projects(port) WHERE archived = 0;
 CREATE INDEX IF NOT EXISTS idx_reports_project ON reports(project_id, id DESC);
@@ -154,6 +163,11 @@ try {
 } catch {
   /* 列已存在 */
 }
+
+// 迁移：人气值（点击统计，按「终端 + 项目 + 时间窗」去重）
+try {
+  db.exec('ALTER TABLE projects ADD COLUMN hits INTEGER NOT NULL DEFAULT 0');
+} catch {}
 
 // 迁移：项目展示信息（注册时采集，用于大屏/后台展示）与交付形态
 for (const col of ['members', 'summary', 'value', 'features', 'scenario', 'artifact_name']) {
@@ -224,6 +238,7 @@ if (!columnsOf('reports').includes('evidence')) {
   }
 }
 
+db.exec(TABLES_EXTRA);
 db.exec(INDEXES);
 db.pragma('foreign_keys = ON');
 db.pragma('journal_mode = WAL');

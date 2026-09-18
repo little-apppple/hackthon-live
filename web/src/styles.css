@@ -546,3 +546,23 @@ a { color: var(--txt-bright); text-decoration: none; transition: all 0.2s ease; 
 .submitted-item { cursor: pointer; }
 .submitted-item:hover { background: rgba(194, 59, 34, 0.12); }
 .project-card { cursor: pointer; }
+
+/* ---- 人气榜与点击数 ---- */
+.hot-panel {
+  flex-shrink: 0; max-height: 196px; display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px;
+  background: linear-gradient(170deg, rgba(13, 13, 13, 0.92), rgba(6, 6, 6, 0.96));
+}
+.hot-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
+.hot-list::-webkit-scrollbar { width: 5px; }
+.hot-list::-webkit-scrollbar-thumb { background: rgba(194, 59, 34, 0.3); }
+.hot-empty { color: var(--txt-faint); font-size: 13px; text-align: center; padding: 14px 0; }
+.hot-item { display: flex; align-items: center; gap: 10px; }
+.hot-rank { font-family: var(--font-mono); font-size: 13px; color: var(--red-hot); flex-shrink: 0; }
+.hot-info { flex: 1; min-width: 0; }
+.hot-name { font-size: 14px; color: var(--txt-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hot-bar { margin-top: 4px; height: 4px; border-radius: 2px; background: rgba(200, 200, 200, 0.12); overflow: hidden; }
+.hot-bar-fill { height: 100%; background: linear-gradient(90deg, #8a2f1c, var(--red)); box-shadow: 0 0 8px rgba(194, 59, 34, 0.5); transition: width .5s ease; }
+.hot-count { font-family: var(--font-mono); font-size: 14px; color: var(--white); flex-shrink: 0; min-width: 28px; text-align: right; }
+.pc-hits { font-family: var(--font-mono); font-size: 11px; color: var(--amber, #ffb200); flex-shrink: 0; }
+.submitted-hits { font-family: var(--font-mono); font-size: 11px; color: var(--txt); }

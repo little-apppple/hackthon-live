@@ -168,6 +168,28 @@ router.post('/report', aw(async (req, res) => {
 const CLIENT_ID_RE = /^cli_[0-9a-f]{32}$/;
 const registerAttempts = new Map(); // ip -> epoch ms 数组
 const loopLastAt = new Map(); // projectId -> epoch ms（loop 每项目 10s 窗口）
+
+// 人气上报限频（每 IP 每分钟 60 次）与明细清理（只保留去重窗口所需的时间范围）
+const hitAttempts = new Map(); // ip -> epoch ms 数组
+function hitRateLimited(ip) {
+  const now = Date.now();
+  const arr = (hitAttempts.get(ip) || []).filter((t) => now - t < 60 * 1000);
+  if (arr.length >= 60) return true;
+  arr.push(now);
+  hitAttempts.set(ip, arr);
+  return false;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, arr] of hitAttempts) {
+    if (!arr.some((t) => now - t < 60 * 1000)) hitAttempts.delete(ip);
+  }
+  try {
+    db.prepare('DELETE FROM hit_events WHERE ts < ?').run(now - Math.max(config.hitWindowMs * 10, 3600000));
+  } catch {
+    /* 清理失败不影响服务 */
+  }
+}, 10 * 60 * 1000).unref();
 setInterval(() => {
   const cutoff = Date.now() - 60 * 1000;
   for (const [ip, arr] of registerAttempts) {
@@ -471,6 +493,64 @@ router.post('/bind-client', (req, res) => {
   });
 });
 
+// 人气值：点击上报（大屏上点击「打开项目」或「下载安装包」时触发）
+// 去重规则：同一终端对同一项目，在 hitWindowMs（默认 60 秒）内的多次点击只计一次
+router.post('/hit', (req, res) => {
+  const ip = req.ip || '';
+  if (hitRateLimited(ip)) {
+    return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: '点击上报过于频繁' });
+  }
+  const projectId = Number(req.body?.projectId);
+  if (!Number.isInteger(projectId) || projectId <= 0) {
+    return res.status(400).json({ ok: false, code: 'INVALID_PROJECT', error: '缺少有效的 projectId' });
+  }
+  const kind = req.body?.kind === 'package' ? 'package' : 'web';
+  const project = db.prepare('SELECT id, revoked, archived FROM projects WHERE id = ?').get(projectId);
+  if (!project || project.archived) {
+    return res.status(404).json({ ok: false, code: 'INVALID_PROJECT', error: '项目不存在' });
+  }
+  // 终端标识：前端 localStorage 生成的随机串；缺失时回退 IP + UA（弱标识）
+  const rawTerminal = String(req.body?.terminal ?? '').trim().slice(0, 64);
+  const terminal = rawTerminal || `ip:${crypto.createHash('sha256').update(`${ip}|${req.headers['user-agent'] || ''}`).digest('hex').slice(0, 32)}`;
+
+  const now = Date.now();
+  const last = db
+    .prepare('SELECT ts FROM hit_events WHERE project_id = ? AND terminal = ? ORDER BY ts DESC LIMIT 1')
+    .get(projectId, terminal);
+  if (last && now - last.ts < config.hitWindowMs) {
+    const hits = db.prepare('SELECT hits FROM projects WHERE id = ?').get(projectId)?.hits ?? 0;
+    return res.json({ ok: true, counted: false, hits, windowMs: config.hitWindowMs });
+  }
+
+  db.transaction(() => {
+    db.prepare('INSERT INTO hit_events (project_id, terminal, kind, ts) VALUES (?, ?, ?, ?)').run(projectId, terminal, kind, now);
+    db.prepare("UPDATE projects SET hits = hits + 1, updated_at = datetime('now','localtime') WHERE id = ?").run(projectId);
+  })();
+  const hits = db.prepare('SELECT hits FROM projects WHERE id = ?').get(projectId)?.hits ?? 0;
+  notifyRefresh('hit');
+  res.json({ ok: true, counted: true, hits, windowMs: config.hitWindowMs });
+});
+
+// 查询人气值（大屏/后台/CLI 复用）
+router.get('/hits', (req, res) => {
+  const accessKey = req.headers['x-access-key'] || req.query.accessKey;
+  if (accessKey) {
+    const project = db.prepare('SELECT id, name, hits, deliverable FROM projects WHERE access_key = ?').get(String(accessKey).trim());
+    if (!project) return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: 'accessKey 无效' });
+    return res.json({ ok: true, projectName: project.name, hits: project.hits || 0, deliverable: project.deliverable });
+  }
+  const event = getActiveEvent();
+  const rows = db
+    .prepare(
+      `SELECT p.id AS projectId, p.name, p.hits FROM projects p
+        WHERE p.event_id = ? AND p.archived = 0 AND p.revoked = 0
+        ORDER BY p.hits DESC, p.id DESC LIMIT 20`
+    )
+    .all(event.id);
+  res.json({ ok: true, eventId: event.id, projects: rows });
+});
+
+// Agent 查询当前进度与下一节点（409 自愈 / --verify 定位部署地址用）
 // AI 参考评分：最终提交后由 CLI 自动计算并上报（机器可判定维度 + 证据；主观项单列不计入自动分）
 // 只接受已提交（8/8）的项目；允许重算覆盖（以最后一次为准），历史留审计
 router.post('/score', aw(async (req, res) => {

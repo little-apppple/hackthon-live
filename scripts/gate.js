@@ -50,6 +50,7 @@ function runSuite(name, args, { env = {}, cwd = ROOT } = {}) {
       PUBLIC_HOST: 'localhost',
       ADMIN_PASSWORD: ADMIN_PW,
       REGISTER_RATE_LIMIT_PER_MIN: '100',
+      HIT_WINDOW_MS: '1000',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

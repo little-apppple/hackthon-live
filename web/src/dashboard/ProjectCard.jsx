@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { reportHit } from '../hit.js';
 
 const STATUS_TEXT = {
   loading: '等待启动',
@@ -49,6 +50,11 @@ export default function ProjectCard({ project, stages, onOpenDetail }) {
         <span className="pc-percent">{project.progress}%</span>
       </div>
       <div className="pc-bottom">
+        {typeof project.hits === 'number' && project.hits > 0 && (
+          <span className="pc-hits" title="人气值（按终端去重）">
+            人气 {project.hits}
+          </span>
+        )}
         <span className="pc-stage-hint">
           {revoked
             ? '上报已被禁用'
@@ -61,12 +67,32 @@ export default function ProjectCard({ project, stages, onOpenDetail }) {
                   : `当前节点：${currentStage ? currentStage.name : '—'}`}
         </span>
         {linkReady && !isPackage && (
-          <a className="pc-link-btn" href={project.link} target="_blank" rel="noreferrer" title={project.link} onClick={(e) => e.stopPropagation()}>
+          <a
+            className="pc-link-btn"
+            href={project.link}
+            target="_blank"
+            rel="noreferrer"
+            title={project.link}
+            onClick={(e) => {
+              e.stopPropagation();
+              reportHit(project.id, 'web');
+            }}
+          >
             ▶ 打开项目
           </a>
         )}
         {project.deliverable === 'package' && project.artifactUrl && project.completed_stages >= 6 && !revoked && (
-          <a className="pc-link-btn" href={project.artifactUrl} target="_blank" rel="noreferrer" title={project.artifactUrl} onClick={(e) => e.stopPropagation()}>
+          <a
+            className="pc-link-btn"
+            href={project.artifactUrl}
+            target="_blank"
+            rel="noreferrer"
+            title={project.artifactUrl}
+            onClick={(e) => {
+              e.stopPropagation();
+              reportHit(project.id, 'package');
+            }}
+          >
             ⬇ 下载安装包
           </a>
         )}
