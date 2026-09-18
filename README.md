@@ -1,6 +1,6 @@
 # 企业黑客松大赛实时大屏系统
 
-Node.js 全栈（Express + node:sqlite + Vite/React/ECharts）的黑客松现场驾驶舱：**多期活动数据完全隔离**，大屏实时展示 **部门 → 小组 → 项目** 三级进度，项目通过 **上报 Skill** 自动汇报 8 个流程节点（最终提交由用户本人确认）、`--deploy` 自动部署到预留端口、`--verify` 自动化线上验收。SQLite 使用 Node 22.5+ 内置的 `node:sqlite`，无需任何原生编译。
+Node.js 全栈（Express + node:sqlite + Vite/React/ECharts）的黑客松现场驾驶舱，**支持 Web 应用与安装包（非 Web 应用）两类交付**：**多期活动数据完全隔离**，大屏实时展示 **部门 → 小组 → 项目** 三级进度，项目通过 **上报 Skill** 自动汇报 8 个流程节点（最终提交由用户本人确认）、`--deploy` 自动部署到预留端口、`--verify` 自动化线上验收。SQLite 使用 Node 22.5+ 内置的 `node:sqlite`，无需任何原生编译。
 
 完整需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)，**分角色使用手册见 [docs/USERGUIDE.md](docs/USERGUIDE.md)**（管理员 / 参赛小组 / 评委观众），**技能包下发与自助注册手册见 [docs/REGISTRATION.md](docs/REGISTRATION.md)**。
 
@@ -104,6 +104,7 @@ node skill/vibecoding-workflow/scripts/setup.js --project <目录>  # 面向其�
 | `DEPLOY_PATH_PREPEND` | - | 部署进程 PATH 前置目录（如 /opt/node22/bin） |
 | `DEPLOY_ROOT` | server/data/deploys | 自动部署产物与运行目录 |
 | `DEPLOY_MAX_MB` | 200 | 部署产物大小上限（解包后大小/文件数同样受配额限制） |
+| `REGISTER_RATE_LIMIT_PER_MIN` | 10 | 自助注册每 IP 每分钟上限 |
 | `DEPLOY_RATE_LIMIT_MS` | 10000 | 同一项目两次部署的最小间隔（自动部署防刷） |
 | `DEPLOY_START_TIMEOUT_MS` | 60000 | 部署启动探活超时 |
 
@@ -122,6 +123,22 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 5. **自动部署（上线部署节点）**：小组 Agent 执行 `node report.js --deploy`——自动打包上传（排除 node_modules/.git），服务端解压到 `data/deploys/<项目ID>/`、按需 `npm install`、以预留端口启动（或托管静态站），60 秒内探活通过后**自动上报「上线部署」**并点亮大屏链接。崩溃自动重启（最多 10 次）；服务重启后只恢复**当前活动**的部署进程。
 6. **线上验收（自动化）**：小组 Agent 执行 `node report.js --verify`——依次完成**线上应用探活 → 接口测试（`verify.api`）→ E2E 测试（`verify.e2e`）**，全部通过后自动上报验收并附证据；任一步失败则不上报（退出码 3），修复后重试。
 7. **监管**：后台可查看各项目部署进程状态、停止/启动/重启；可随时吊销/恢复 accesskey、归档项目（归档自动停服并释放端口）；所有上报（含被拒）与部署/验收证据都有审计记录。
+
+## 交付形态与注册信息
+
+**两类交付**（自动识别或显式指定）：
+
+| 类型 | 命令 | 完成判定 |
+|---|---|---|
+| Web 应用（node/static） | `--deploy`（默认 node）/ `--deploy --dir dist --type static` | 预留端口探活通过 |
+| **安装包（非 Web 应用）** | `--deploy --type package --file dist/setup.exe` | 上传成功 + **下载链接可用**（探活 + 附件头 + 大小一致） |
+
+- 支持格式：exe / msi / zip / 7z / tar.gz / apk / dmg / pkg / deb / rpm / jar / appimage，单包上限同 `DEPLOY_MAX_MB`；
+- 安装包发布后预留端口提供落地页（含「下载安装包」按钮）与直链 `http://<主机>:<端口>/<文件名>`；
+- 验收：`--verify --file <本地包>` 自动校验探活 + 下载可用 + 大小一致 + 附件头，通过后自动上报验收节点；
+- 大屏与后台按交付形态显示「打开项目」或「下载安装包」。
+
+**注册信息（大屏/后台展示用）**：自助注册可一并提交 `members`（参与人员）、`summary`（需求简述）、`value`（价值）、`features`（功能）、`scenario`（场景）；CLI 交互注册逐项提示（可跳过），也支持同名命令行参数一次性带参；**同一客户端重注册可更新这些信息**。大屏点击项目卡/已提交榜项弹出详情，管理端项目表「查看」读同一份信息。
 
 ## AI 参考评分
 
@@ -164,6 +181,7 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 |---|---|---|
 | POST | `/api/report` | 上报节点完成 `{accessKey, stage, message, evidence?}` |
 | POST | `/api/register` | 自助注册：`{department, group, project, clientId, registerToken, description?}` → 录入名单+预留端口+发 accessKey；**以 clientId 幂等**（同一 clientId 重跑返回同一 key，换名亦然）；不同 clientId 撞同名 → 409 `NAME_TAKEN`。需本期注册令牌（管理员 `/api/admin/register-token` 签发）；错误码 `INVALID_PARAMS` / `INVALID_CLIENT_ID` / `REGISTER_TOKEN_INVALID` / `NAME_TAKEN` / `NO_FREE_PORT` / `PORT_CONFLICT`，每 IP 限频 10 次/分钟（按直连 IP 计，勿置于无 realip 配置的反向代理之后） |
+| POST | `/api/deploy?type=package&file=<包名>` | 非 Web 应用：上传安装包（raw body），服务端在预留端口发布下载链接（落地页 + 附件下载），下载可用即视为部署完成 |
 | POST | `/api/score` | AI 参考评分上报（**仅最终提交后**）：`{accessKey, score(0-100), detail}`，参数错误 `INVALID_SCORE`(400)/未提交 `SCORE_NOT_ALLOWED`(409)；评分规范见 docs/AI-SCORING.md |
 | GET | `/api/score` | 查询已存档的参考分与明细（`x-access-key` 请求头） |
 | POST | `/api/bind-client` | 手工发 key 模式绑定客户端：`{accessKey, clientId}`；首次绑定成功、同 clientId 幂等、他人已绑定 → 409 `CLIENT_MISMATCH` |

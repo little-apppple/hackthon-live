@@ -177,7 +177,7 @@ setInterval(() => {
 function registerRateLimited(ip) {
   const now = Date.now();
   const arr = (registerAttempts.get(ip) || []).filter((t) => now - t < 60 * 1000);
-  if (arr.length >= 10) return true;
+  if (arr.length >= config.registerRateLimitPerMin) return true;
   arr.push(now);
   registerAttempts.set(ip, arr);
   return false;
@@ -201,6 +201,14 @@ router.post('/register', aw(async (req, res) => {
   const projectName = norm(req.body?.project);
   const description = String(req.body?.description ?? '').trim().slice(0, 200);
   const clientId = String(req.body?.clientId ?? '').trim();
+  // 展示信息（注册时采集，用于大屏/后台展示）：参与人员、需求简述、价值、功能、场景
+  const info = {
+    members: String(req.body?.members ?? '').trim().slice(0, 200),
+    summary: String(req.body?.summary ?? '').trim().slice(0, 300),
+    value: String(req.body?.value ?? '').trim().slice(0, 300),
+    features: String(req.body?.features ?? '').trim().slice(0, 500),
+    scenario: String(req.body?.scenario ?? '').trim().slice(0, 300),
+  };
   if (!deptName || !groupName || !projectName) {
     return res.status(400).json({
       ok: false,
@@ -297,10 +305,10 @@ router.post('/register', aw(async (req, res) => {
           let group = db.prepare('SELECT id FROM groups WHERE department_id = ? AND name = ?').get(dept.id, groupName);
           if (!group) db.prepare('INSERT INTO groups (event_id, department_id, name) VALUES (?, ?, ?)').run(event.id, dept.id, groupName);
           group = db.prepare('SELECT id FROM groups WHERE department_id = ? AND name = ?').get(dept.id, groupName);
-          const info = db
-            .prepare('INSERT INTO projects (event_id, group_id, name, description, access_key, port, client_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
-            .run(event.id, group.id, projectName, description, genAccessKey(), port, clientId || null);
-          return { project: db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid), created: true };
+          const inserted = db
+            .prepare('INSERT INTO projects (event_id, group_id, name, description, access_key, port, client_id, members, summary, value, features, scenario) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(event.id, group.id, projectName, description, genAccessKey(), port, clientId || null, info.members, info.summary, info.value, info.features, info.scenario);
+          return { project: db.prepare('SELECT * FROM projects WHERE id = ?').get(inserted.lastInsertRowid), created: true };
         });
         const run = tx(); // transaction() 返回包装函数，必须调用才执行
         project = run.project;
@@ -321,6 +329,16 @@ router.post('/register', aw(async (req, res) => {
     notifyRefresh('project-created');
   }
   if (!createdNow) {
+    // 同一客户端重注册：允许更新展示信息（改成员/补简介等），不影响名称与密钥
+    if (clientId && project.client_id === clientId) {
+      const fields = ['members', 'summary', 'value', 'features', 'scenario'].filter((k) => info[k]);
+      if (fields.length) {
+        db.prepare(`UPDATE projects SET ${fields.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now','localtime') WHERE id = ?`)
+          .run(...fields.map((k) => info[k]), project.id);
+        for (const k of fields) project[k] = info[k];
+        audit(project.id, 'register', 1, null, `更新展示信息（${fields.join('/')}）`, ip);
+      }
+    }
     // 幂等命中：提示名称是否与首次绑定的不一致（项目名称以首次注册为准）
     const bound = db
       .prepare(
@@ -345,6 +363,7 @@ router.post('/register', aw(async (req, res) => {
     revoked: !!project.revoked,
     eventId: event.id,
     projectName: project.name,
+    info: { members: project.members, summary: project.summary, value: project.value, features: project.features, scenario: project.scenario },
     accessKey: project.access_key,
     port: project.port,
     deployUrl: `http://${config.publicHost}:${project.port}`,

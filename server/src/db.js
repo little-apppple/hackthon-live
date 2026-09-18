@@ -155,6 +155,16 @@ try {
   /* 列已存在 */
 }
 
+// 迁移：项目展示信息（注册时采集，用于大屏/后台展示）与交付形态
+for (const col of ['members', 'summary', 'value', 'features', 'scenario', 'artifact_name']) {
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN ${col} TEXT`);
+  } catch {}
+}
+try {
+  db.exec("ALTER TABLE projects ADD COLUMN deliverable TEXT NOT NULL DEFAULT 'web'");
+} catch {}
+
 // 迁移：AI 参考评分（提交后自动计算并上报）
 try {
   db.exec('ALTER TABLE projects ADD COLUMN ai_score INTEGER');

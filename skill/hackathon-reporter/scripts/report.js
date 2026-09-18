@@ -136,6 +136,12 @@ function parseArgs(argv) {
     else if (a === '--group') args.group = argv[++i];
     else if (a === '--project') args.project = argv[++i];
     else if (a === '--description') args.description = argv[++i];
+    else if (a === '--members') args.members = argv[++i];
+    else if (a === '--summary') args.summary = argv[++i];
+    else if (a === '--value') args.value = argv[++i];
+    else if (a === '--features') args.features = argv[++i];
+    else if (a === '--scenario') args.scenario = argv[++i];
+    else if (a === '--file') args.file = argv[++i];
     else if (a === '--register-token') args.registerToken = argv[++i];
     else if (a === '--loop') args.loop = true;
     else if (a === '--submit') args.submit = true;
@@ -315,8 +321,8 @@ function bakedConfig() {
 }
 
 // 注册模式：向服务端自助注册换取 accessKey（以 clientId 幂等，可安全重跑）
-async function registerOnServer(serverUrl, registerToken, { department, group, project, description, clientId }) {
-  const payload = JSON.stringify({ department, group, project, description: description || '', registerToken, clientId });
+async function registerOnServer(serverUrl, registerToken, { department, group, project, description, clientId, members, summary, value, features, scenario }) {
+  const payload = JSON.stringify({ department, group, project, description: description || '', registerToken, clientId, members, summary, value, features, scenario });
   const { status, body } = await callApiWithRetry(
     { serverUrl },
     '/api/register',
@@ -383,6 +389,8 @@ async function cmdInit(args) {
     const department = args.department;
     const group = args.group;
     const project = args.project;
+    // 展示信息（大屏/后台面板用）：参与人员、需求简述、价值、功能、场景
+    const infoArgs = { members: args.members, summary: args.summary, value: args.value, features: args.features, scenario: args.scenario };
     if (!department || !group || !project) {
       console.log(`== 黑客松自助注册 ==（服务端：${serverUrl}）`);
       console.log('填写部门 / 小组 / 项目名称，服务端自动录入名单、预留部署端口并发放 accessKey');
@@ -400,6 +408,17 @@ async function cmdInit(args) {
           const desc = (await ask(rl, '④ 项目一句话简介（可回车跳过）: ')).trim();
           if (desc) args.description = desc;
         }
+        console.log('   以下信息用于大屏/后台展示，建议填写（可回车跳过）：');
+        const askField = async (key, label) => {
+          if (args[key]) return;
+          const v = (await ask(rl, `${label}: `)).trim();
+          if (v) args[key] = v;
+        };
+        await askField('members', '⑤ 参与人员（多人用顿号分隔）');
+        await askField('summary', '⑥ 需求简述');
+        await askField('value', '⑦ 项目价值');
+        await askField('features', '⑧ 核心功能');
+        await askField('scenario', '⑨ 应用场景');
       } finally {
         rl.close();
       }
@@ -426,6 +445,7 @@ async function cmdInit(args) {
       project: args.project,
       description: args.description,
       clientId,
+      ...infoArgs,
     });
     accessKey = r.accessKey;
     deployUrl = r.deployUrl;
@@ -1144,11 +1164,124 @@ async function cmdNext(args, cfg) {
 
 // ---------- 自动部署：打包 → 上传 → 服务端起服 → 自动上报「上线部署」 ----------
 
+async function cmdDeployPackage(args, cfg) {
+  console.log('== 黑客松自动部署（安装包交付 · 非 Web 应用）==');
+  const filePath = args.file ? path.resolve(process.cwd(), args.file) : '';
+  if (!filePath || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    console.error('✗ 需用 --file <安装包路径> 指定要上传的安装包（如 --deploy --type package --file dist/setup.exe）');
+    process.exit(2);
+  }
+  const name = path.basename(filePath);
+  const size = fs.statSync(filePath).size;
+  if (size === 0) {
+    console.error('✗ 安装包文件为空');
+    process.exit(2);
+  }
+  if (size > 200 * 1024 * 1024) {
+    console.error(`✗ 安装包 ${(size / 1024 / 1024).toFixed(1)}MB 超过上限 200MB（精简产物或用 --dir/--type static 交付网页版）`);
+    process.exit(2);
+  }
+  console.log(`安装包: ${name}（${(size / 1024 / 1024).toFixed(1)} MB）`);
+  console.log('→ 上传并按预留端口发布下载链接…');
+  const q = new URLSearchParams({ type: 'package', file: name });
+  try {
+    let res = await fetch(cfg.serverUrl.replace(/\/$/, '') + '/api/deploy?' + q, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', ...authHeader(cfg) },
+      body: fs.readFileSync(filePath),
+      signal: AbortSignal.timeout(300000),
+    });
+    let data = await res.json().catch(() => null);
+    if (res.status === 429 && data?.retryAfterSeconds) {
+      const wait = Math.min(data.retryAfterSeconds, 15);
+      console.log(`⏳ 部署过于频繁，${wait} 秒后自动重试…`);
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      res = await fetch(cfg.serverUrl.replace(/\/$/, '') + '/api/deploy?' + q, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream', ...authHeader(cfg) },
+        body: fs.readFileSync(filePath),
+        signal: AbortSignal.timeout(300000),
+      });
+      data = await res.json().catch(() => null);
+    }
+    if (res.ok && data?.ok) {
+      console.log(`✓ 安装包已发布: ${data.artifactUrl || data.deployUrl}`);
+      if (data.stageReported) {
+        console.log('  已自动上报「上线部署」，大屏下载链接已开放。');
+        console.log(`  进度: 6/${TOTAL_STAGES}（75%）  下一节点: 7. 线上验收 (acceptance)`);
+        console.log('  下一步: node report.js --verify（会校验下载链接可用性）');
+      } else if (data.note) {
+        console.log(`  ${data.note}`);
+      }
+      process.exit(0);
+    }
+    printApiError(res.status, data);
+  } catch {
+    networkError();
+  }
+}
+
+// 安装包交付的验收：探活 + 下载链接可用性（HTTP 200 且大小与本地一致）
+async function verifyPackage(cfg, url, localFile) {
+  let deployedUrl = url;
+  if (!deployedUrl) {
+    try {
+      const st = await callApiWithRetry(cfg, '/api/report/status', { headers: authHeader(cfg) });
+      if (st.body?.port) deployedUrl = `http://${new URL(cfg.serverUrl).hostname}:${st.body.port}`;
+    } catch {
+      /* 交给下游报错 */
+    }
+  }
+  if (!deployedUrl) {
+    console.error('✗ 无法确定部署地址：请用 --url 指定，或在配置里补 deployUrl');
+    process.exit(1);
+  }
+  console.log(`→ 探活 ${deployedUrl} …`);
+  const live = await probeLiveness(deployedUrl, 8);
+  if (!live.ok) {
+    console.error(`✗ 探活失败：${live.error || live.detail}`);
+    process.exit(3);
+  }
+  console.log(`✓ 探活通过（${live.detail}）`);
+
+  const name = localFile ? path.basename(localFile) : (cfg.deploy?.file ? path.basename(cfg.deploy.file) : '');
+  if (!name) {
+    console.error('✗ 无法确定安装包文件名：请用 --file 指定本地安装包（与上传时同名）');
+    process.exit(3);
+  }
+  const downloadUrl = `${deployedUrl.replace(/\/$/, '')}/${encodeURIComponent(name)}`;
+  console.log(`→ 校验下载链接 ${downloadUrl} …`);
+  try {
+    const res = await fetch(downloadUrl, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) {
+      console.error(`✗ 下载链接不可用（HTTP ${res.status}）`);
+      process.exit(3);
+    }
+    const remoteSize = Number(res.headers.get('content-length') || 0);
+    const localSize = localFile && fs.existsSync(localFile) ? fs.statSync(localFile).size : 0;
+    if (localSize && remoteSize && remoteSize !== localSize) {
+      console.error(`✗ 下载内容大小不一致（线上 ${remoteSize} 字节 / 本地 ${localSize} 字节）`);
+      process.exit(3);
+    }
+    const disp = res.headers.get('content-disposition') || '';
+    if (!/attachment/i.test(disp)) {
+      console.error('✗ 下载响应未带附件头（content-disposition: attachment），浏览器会直接打开而非下载');
+      process.exit(3);
+    }
+    console.log(`✓ 下载链接可用（${(remoteSize / 1024 / 1024).toFixed(1)} MB${localSize ? '，与本地一致' : ''}）`);
+    return { ok: true, checks: [`探活 ${live.detail}`, `下载可用 ${remoteSize} 字节`, '附件头正确'] };
+  } catch (e) {
+    console.error(`✗ 下载链接校验失败：${e.message}`);
+    process.exit(3);
+  }
+}
+
 async function cmdDeploy(args, cfg) {
   const dcfg = cfg.deploy || {};
   const type = args.type || dcfg.type || 'node';
+  if (type === 'package') return cmdDeployPackage(args, cfg);
   if (!['node', 'static'].includes(type)) {
-    console.error(`✗ 无效的部署类型: ${type}（应为 node 或 static）`);
+    console.error(`✗ 无效的部署类型: ${type}（应为 node / static / package）`);
     process.exit(2);
   }
   const dir = args.dir || dcfg.dir || '.';
@@ -1280,6 +1413,42 @@ async function probeLiveness(url, retries) {
 }
 
 async function cmdVerify(args, cfg) {
+  // 安装包交付（非 Web 应用）：探活 + 下载链接可用性校验
+  if ((cfg.deploy?.type || args.type) === 'package') {
+    const localFile = args.file ? path.resolve(process.cwd(), args.file) : cfg.deploy?.file ? path.resolve(process.cwd(), cfg.deploy.file) : '';
+    console.log('== 黑客松线上验收（安装包交付）==');
+    const result = await verifyPackage(cfg, args.url, localFile);
+    if (args.dry) {
+      console.log('（--dry：仅本地校验，未上报）');
+      process.exit(0);
+    }
+    const payload = JSON.stringify({ accessKey: cfg.accessKey, stage: 'acceptance', message: '安装包交付验收通过（下载链接可用）', evidence: { checks: result.checks } });
+    try {
+      let { status, body } = await callApiWithRetry(cfg, '/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      });
+      if (status === 429 && body?.retryAfterSeconds) {
+        const wait = Math.min(body.retryAfterSeconds, 15);
+        console.log(`⏳ 上报过于频繁，${wait} 秒后自动重试…`);
+        await new Promise((r) => setTimeout(r, wait * 1000));
+        ({ status, body } = await callApiWithRetry(cfg, '/api/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+        }));
+      }
+      if (status === 200 && body?.ok) {
+        console.log(`✓ ${body.message}`);
+        if (body.nextStage) console.log(`  下一节点: ${body.nextStage.index}. ${body.nextStage.name}（由你本人执行 --submit 完成最终提交）`);
+        process.exit(0);
+      }
+      printApiError(status, body);
+    } catch {
+      networkError();
+    }
+  }
   const verifyCfg = cfg.verify || {};
   console.log('== 黑客松线上验收自动化 ==');
 

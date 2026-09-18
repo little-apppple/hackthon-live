@@ -71,7 +71,7 @@ async function tryFetch(url) {
   check('测试服务启动', up);
   if (!up) process.exit(1);
 
-  let proj1 = null;
+  let proj1 = null, projPkg;
   let proj2 = null;
   let proj3 = null;
   let cookie = '';
@@ -186,10 +186,54 @@ async function tryFetch(url) {
     check('部署本身成功', d3 === 0);
     const s3 = await (await fetch(BASE + `/api/report/status?accessKey=${proj3.accessKey}`)).json();
     check('进度未被推进（仍 0/7）', s3.completedStages === 0, JSON.stringify(s3));
+    // ---- 安装包交付（非 Web 应用：上传安装包，下载链接可用即视为部署完成）----
+    console.log('\n-- 安装包交付 --');
+    const pkgDir = path.join(TMP, 'fixture-package');
+    fs.mkdirSync(pkgDir, { recursive: true });
+    const pkgName = 'DemoApp-Setup-1.0.0.zip';
+    const pkgBuf = Buffer.alloc(512 * 1024);
+    pkgBuf.write('PK\\x03\\x04', 0, 'binary');
+    fs.writeFileSync(path.join(pkgDir, pkgName), pkgBuf);
+    projPkg = await create('安装包交付用例', 2);
+    fs.writeFileSync(
+      path.join(pkgDir, 'hackathon.config.json'),
+      JSON.stringify({ serverUrl: BASE, accessKey: projPkg.accessKey, deploy: { type: 'package', file: pkgName } }, null, 2)
+    );
+    for (const st of ['requirements', 'design', 'prototype', 'coding', 'testing']) {
+      const code = await runCli(['--stage', st, '--message', 'deploy-e2e-pkg'], pkgDir);
+      check(`安装包项目上报 ${st}`, code === 0);
+    }
+    const dPkg = await runCli(['--deploy', '--type', 'package', '--file', pkgName], pkgDir);
+    check('安装包 --deploy 退出码 0', dPkg === 0);
+    const sPkg = await (await fetch(BASE + `/api/report/status?accessKey=${projPkg.accessKey}`)).json();
+    check('安装包发布后自动上报部署节点（6/8）', sPkg.completedStages === 6 && sPkg.progress === 75, JSON.stringify(sPkg));
+    const landingRes = await fetch(`http://localhost:${projPkg.port}/`).catch(() => null);
+    const landingText = landingRes ? await landingRes.text() : '';
+    check('落地页可访问且含下载入口', landingRes?.status === 200 && /下载安装包/.test(landingText));
+    const dlRes = await fetch(`http://localhost:${projPkg.port}/${pkgName}`).catch(() => null);
+    const dlBuf = dlRes ? Buffer.from(await dlRes.arrayBuffer()) : Buffer.alloc(0);
+    check(
+      '安装包下载链接可用（200 + 附件头 + 大小一致）',
+      dlRes?.status === 200 && /attachment/i.test(dlRes.headers.get('content-disposition') || '') && dlBuf.length === pkgBuf.length,
+      JSON.stringify({ status: dlRes?.status, disp: dlRes?.headers.get('content-disposition'), size: dlBuf.length })
+    );
+    const snapPkg = await (await fetch(BASE + '/api/snapshot')).json();
+    const itemPkg = snapPkg.snapshot.departments
+      .flatMap((x) => x.groups.flatMap((g) => g.projects))
+      .find((x) => x.id === projPkg.id);
+    check(
+      '快照标记为安装包交付并给出下载地址',
+      itemPkg?.deliverable === 'package' && /DemoApp-Setup-1\.0\.0\.zip$/.test(itemPkg?.artifactUrl || ''),
+      JSON.stringify({ deliverable: itemPkg?.deliverable, artifactUrl: itemPkg?.artifactUrl })
+    );
+    const vPkg = await runCli(['--verify', '--file', pkgName], pkgDir);
+    check('安装包 --verify 通过（退出码 0）', vPkg === 0);
+    const sPkg2 = await (await fetch(BASE + `/api/report/status?accessKey=${projPkg.accessKey}`)).json();
+    check('安装包验收自动上报（7/8）', sPkg2.completedStages === 7 && sPkg2.progress === 88, JSON.stringify(sPkg2));
   } finally {
     // 收尾：先通过 API 停掉所有部署（级联杀掉服务端拉起的子进程），再杀测试服务
     try {
-      for (const p of [proj1, proj2, proj3].filter(Boolean)) {
+      for (const p of [proj1, proj2, proj3, projPkg].filter(Boolean)) {
         await fetch(BASE + `/api/admin/deploys/${p.id}/stop`, { method: 'POST', headers: { Cookie: cookie } }).catch(() => {});
       }
     } catch {

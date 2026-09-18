@@ -53,15 +53,21 @@ router.post(
     }
     deployLastAt.set(project.id, now);
 
-    const type = req.query.type === 'static' ? 'static' : 'node';
+    const type = ['static', 'package'].includes(req.query.type) ? req.query.type : 'node';
     const start = String(req.query.start || '').trim() || (type === 'node' ? 'npm start' : '');
     const install = req.query.install === '1';
     const dir = String(req.query.dir || '');
-    if (deployer.resolveAppDir(project, dir) === null) {
+    const pkgFile = String(req.query.file || '').trim();
+    if (type === 'package' && !pkgFile) {
+      return res.status(400).json({ ok: false, code: 'INVALID_FILE', error: '安装包交付需用 ?file=<安装包文件名> 指定（CLI: --deploy --type package --file <路径>）' });
+    }
+    if (type !== 'package' && deployer.resolveAppDir(project, dir) === null) {
       return res.status(400).json({ ok: false, code: 'INVALID_DIR', error: `dir 非法：必须位于应用目录内部（收到 "${dir}"）` });
     }
 
-    const result = await deployer.deployProject(project, { type, start, install, dir }, req.body);
+    const result = type === 'package'
+      ? await deployer.deployPackage(project, { file: pkgFile }, req.body)
+      : await deployer.deployProject(project, { type, start, install, dir }, req.body);
     if (!result.ok) {
       return res.status(500).json({ ok: false, code: 'DEPLOY_FAILED', error: result.error, logTail: result.logTail });
     }
@@ -93,6 +99,8 @@ router.post(
       ok: true,
       code: 'DEPLOYED',
       deployUrl: `http://${config.publicHost}:${project.port}`,
+      deliverable: type,
+      artifactUrl: type === 'package' ? `http://${config.publicHost}:${project.port}/${encodeURIComponent(pkgFile)}` : undefined,
       status: deployer.getStatus(project.id),
       probe: result.probe,
       stageReported,

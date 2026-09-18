@@ -123,6 +123,123 @@ function dirQuota(root, { maxFiles, maxBytes }) {
   return { ok: true, files, bytes };
 }
 
+// ---------- 安装包交付（非 Web 应用）----------
+// 上传单个安装包文件 → 在预留端口起极简下载站（落地页 + 附件下载）→ 下载链接可用即视为部署完成
+const PKG_EXT = /\.(exe|msi|zip|7z|tar|gz|tgz|apk|dmg|pkg|deb|rpm|jar|appimage)$/i;
+const PKG_MIME = {
+  '.exe': 'application/vnd.microsoft.portable-executable',
+  '.msi': 'application/x-msi',
+  '.zip': 'application/zip',
+  '.7z': 'application/x-7z-compressed',
+  '.tar': 'application/x-tar',
+  '.gz': 'application/gzip',
+  '.tgz': 'application/gzip',
+  '.apk': 'application/vnd.android.package-archive',
+  '.dmg': 'application/x-apple-diskimage',
+  '.pkg': 'application/octet-stream',
+  '.deb': 'application/vnd.debian.binary-package',
+  '.rpm': 'application/x-rpm',
+  '.jar': 'application/java-archive',
+  '.appimage': 'application/octet-stream',
+};
+
+async function deployPackage(project, opts, archiveBuffer) {
+  const root = appRoot(project.id);
+  const appDir = path.join(root, 'app');
+  const rawName = String(opts.file || '').trim();
+  const base = path.basename(rawName).replace(/[^\w.\-\u4e00-\u9fa5]+/g, '_').slice(0, 120);
+  if (!base) return { ok: false, error: '安装包文件名无效，请用 --file <安装包路径> 指定' };
+  if (!PKG_EXT.test(base)) {
+    return { ok: false, error: `不支持的安装包格式：${base}（支持 exe/msi/zip/7z/tar.gz/apk/dmg/pkg/deb/rpm/jar/appimage）` };
+  }
+
+  // 停旧实例并清目录（与部署 web 应用一致，重复部署是覆盖语义）
+  const old = states.get(project.id);
+  if (old) await stopProcess(old);
+  for (let i = 0; i < 5; i++) {
+    try {
+      fs.rmSync(appDir, { recursive: true, force: true });
+      break;
+    } catch {
+      await sleep(500);
+    }
+  }
+  fs.mkdirSync(appDir, { recursive: true });
+  fs.writeFileSync(path.join(appDir, base), archiveBuffer);
+
+  // 落地页：评委打开预留端口即可看到下载入口
+  const sizeMb = (archiveBuffer.length / 1024 / 1024).toFixed(1);
+  fs.writeFileSync(
+    path.join(appDir, 'index.html'),
+    `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${project.name} · 安装包下载</title>
+<style>body{margin:0;background:#050505;color:#e8e8e8;font-family:'Courier New',monospace;display:flex;align-items:center;justify-content:center;height:100vh}
+main{border:1px solid rgba(194,59,34,.5);border-radius:8px;padding:32px 40px;text-align:center}
+h1{font-size:22px;margin:0 0 6px}p{color:#7a7a7a;font-size:14px;margin:6px 0 18px}
+a{display:inline-block;background:#c23b22;color:#fff;text-decoration:none;padding:12px 26px;border-radius:4px;font-weight:700}
+a:hover{background:#e85a3a}code{color:#c8c8c8}</style></head>
+<body><main><h1>${project.name}</h1><p>安装包 · ${sizeMb} MB</p><a href="./${encodeURIComponent(base)}" download>下载安装包</a>
+<p><code>${base}</code></p></main></body></html>`
+  );
+
+  const meta = {
+    type: 'package',
+    file: base,
+    install: false,
+    start: '',
+    port: project.port,
+    projectName: project.name,
+    deployedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(path.join(root, 'meta.json'), JSON.stringify(meta, null, 2));
+  db.prepare('UPDATE projects SET deliverable = ?, artifact_name = ? WHERE id = ?').run('package', base, project.id);
+
+  const state = ensureState(project);
+  state.lastDeployAt = meta.deployedAt;
+  killPortListener(project.port);
+  const result = await startAndProbe(project, meta, state);
+  if (!result.ok) result.logTail = logTail(project.id);
+  return result;
+}
+
+function startPackageServer(project, meta, state) {
+  const appDir = path.join(appRoot(project.id), 'app');
+  const server = http.createServer((req, res) => {
+    try {
+      const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+      const name = path.basename(urlPath);
+      const target = path.join(appDir, name === '/' || name === '' ? 'index.html' : name);
+      if (!target.startsWith(path.normalize(appDir))) {
+        res.writeHead(403);
+        return res.end('Forbidden');
+      }
+      if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+        res.writeHead(404);
+        return res.end('Not Found');
+      }
+      const ext = path.extname(target).toLowerCase();
+      const headers = { 'Content-Type': PKG_MIME[ext] || MIME[ext] || 'application/octet-stream' };
+      if (PKG_EXT.test(target)) {
+        headers['Content-Disposition'] = `attachment; filename="${encodeURIComponent(path.basename(target))}"`;
+        headers['Content-Length'] = String(fs.statSync(target).size);
+      }
+      res.writeHead(200, headers);
+      fs.createReadStream(target).pipe(res);
+    } catch {
+      res.writeHead(500);
+      res.end('Error');
+    }
+  });
+  state.staticServer = server;
+  server.listen(project.port, '0.0.0.0', () => {
+    state.status = 'running';
+    state.startedAt = Date.now();
+  });
+  server.on('error', (e) => {
+    appendLog(project.id, `[deployer] 安装包下载站监听失败: ${e.message}\n`);
+    state.status = 'failed';
+  });
+}
+
 // 把 meta.dir 解析到 app/ 内部：越界（..、绝对路径）一律拒绝——
 // 否则预留端口会变成任意目录的公开文件服务器（可读到含 accessKey 的数据库）。
 // 空字符串 = app 根目录本身，是合法默认值。
@@ -261,6 +378,7 @@ function startStaticServer(project, meta, state) {
 function startByType(project, meta, state) {
   state.meta = meta;
   if (meta.type === 'static') startStaticServer(project, meta, state);
+  else if (meta.type === 'package') startPackageServer(project, meta, state);
   else startNodeApp(project, meta, state);
 }
 
@@ -508,4 +626,4 @@ function recoverOnBoot() {
   }
 }
 
-module.exports = { deployProject, restartProject, stopProject, startProject, getStatus, listStatus, recoverOnBoot, logTail, resolveAppDir };
+module.exports = { deployProject, deployPackage, restartProject, stopProject, startProject, getStatus, listStatus, recoverOnBoot, logTail, resolveAppDir };

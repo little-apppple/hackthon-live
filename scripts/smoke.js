@@ -304,14 +304,22 @@ async function api(method, path, body, useAuth = true) {
 
     const cliA = 'cli_' + 'a'.repeat(32);
     const cliB = 'cli_' + 'b'.repeat(32);
-    const first = await reg({ department: '注册测试部', group: '注册组', project: '注册项目X', description: '冒烟测试', registerToken: token, clientId: cliA });
+    const first = await reg({
+      department: '注册测试部', group: '注册组', project: '注册项目X', description: '冒烟测试', registerToken: token, clientId: cliA,
+      members: '张三、李四', summary: '一句话需求', value: '业务价值', features: '功能A、功能B', scenario: '使用场景',
+    });
     check('注册成功并发放 hk_ 密钥', first.status === 200 && first.data.ok && /^hk_[0-9a-f]{32}$/.test(first.data.accessKey || ''), JSON.stringify(first.data));
     check('注册时已预留部署端口', first.data.ok && Number.isInteger(first.data.port) && first.data.port >= 4100 && first.data.port <= 4999, JSON.stringify(first.data));
     check('返回 configTemplate（serverUrl/accessKey/deployUrl）', first.data.ok && first.data.configTemplate?.accessKey === first.data.accessKey);
     check('注册响应回显绑定的 clientId', first.data.clientId === cliA && first.data.clientBound === true);
+    check('注册可携带展示信息且回显', first.data.info?.members === '张三、李四' && first.data.info?.features === '功能A、功能B', JSON.stringify(first.data.info));
+
+    const snapInfo = await api('GET', '/api/snapshot', undefined, false);
+    const pInfo = snapInfo.data.snapshot.departments.flatMap((d) => d.groups.flatMap((g) => g.projects)).find((x) => x.name === '注册项目X');
+    check('快照透出展示信息（面板可展示）', pInfo?.summary === '一句话需求' && pInfo?.scenario === '使用场景' && pInfo?.deliverable === 'web', JSON.stringify({ summary: pInfo?.summary, deliverable: pInfo?.deliverable }));
 
     const again = await reg({ department: '注册测试部', group: '注册组', project: '注册项目X', registerToken: token, clientId: cliA });
-    check('同 clientId 重复注册幂等：返回同一密钥', again.data.ok && again.data.accessKey === first.data.accessKey && again.data.idempotent === true, JSON.stringify(again.data));
+    check('同 clientId 幂等：返回同一密钥（含展示信息更新）', again.data.ok && again.data.accessKey === first.data.accessKey && again.data.idempotent === true);
 
     const renamed = await reg({ department: '改名部门', group: '改名组', project: '改名项目', registerToken: token, clientId: cliA });
     check('同 clientId 换名仍返回同一密钥（并提示名称以首次为准）', renamed.data.ok && renamed.data.accessKey === first.data.accessKey && /不一致/.test(renamed.data.warning || ''), JSON.stringify(renamed.data));

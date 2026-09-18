@@ -17,6 +17,7 @@ const config = {
   eventName: process.env.EVENT_NAME || '企业黑客松大赛',
   eventEndTime: process.env.EVENT_END_TIME || '',
   rateLimitMs: intEnv('RATE_LIMIT_MS', 10000),
+  registerRateLimitPerMin: intEnv('REGISTER_RATE_LIMIT_PER_MIN', 10),
   deployRateLimitMs: intEnv('DEPLOY_RATE_LIMIT_MS', 10000),
   sessionTtlMs: intEnv('SESSION_TTL_MS', 24 * 3600 * 1000),
   dbPath: process.env.DB_PATH || path.join(__dirname, '..', 'data', 'hackathon.db'),

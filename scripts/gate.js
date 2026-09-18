@@ -49,6 +49,7 @@ function runSuite(name, args, { env = {}, cwd = ROOT } = {}) {
       DB_PATH: path.join(TMP, 'smoke.db'),
       PUBLIC_HOST: 'localhost',
       ADMIN_PASSWORD: ADMIN_PW,
+      REGISTER_RATE_LIMIT_PER_MIN: '100',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

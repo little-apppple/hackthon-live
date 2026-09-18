@@ -7,7 +7,7 @@ const STATUS_TEXT = {
   done: '已完成',
   submitted: '已提交',
 };
-export default function ProjectCard({ project, stages }) {
+export default function ProjectCard({ project, stages, onOpenDetail }) {
   const revoked = !!project.revoked;
   const status = revoked ? 'revoked' : project.status;
   const stageNames = stages || [];
@@ -15,9 +15,15 @@ export default function ProjectCard({ project, stages }) {
     project.completed_stages < stageNames.length ? stageNames[project.completed_stages] : null;
   const linkReady = !revoked && project.completed_stages >= 6 && project.link;
   const loop = project.loop_count || 1;
+  const isPackage = project.deliverable === 'package';
 
   return (
-    <div className={`project-card ${revoked ? 'is-revoked' : ''}`} data-status={status}>
+    <div
+      className={`project-card ${revoked ? 'is-revoked' : ''}`}
+      data-status={status}
+      onClick={() => onOpenDetail && onOpenDetail(project)}
+      title="点击查看项目详情"
+    >
       <div className="pc-top">
         <span className="pc-name" title={project.name}>
           {project.name}
@@ -54,9 +60,14 @@ export default function ProjectCard({ project, stages }) {
                   ? '最终参赛作品 · 评分版本已定格'
                   : `当前节点：${currentStage ? currentStage.name : '—'}`}
         </span>
-        {linkReady && (
-          <a className="pc-link-btn" href={project.link} target="_blank" rel="noreferrer" title={project.link}>
+        {linkReady && !isPackage && (
+          <a className="pc-link-btn" href={project.link} target="_blank" rel="noreferrer" title={project.link} onClick={(e) => e.stopPropagation()}>
             ▶ 打开项目
+          </a>
+        )}
+        {project.deliverable === 'package' && project.artifactUrl && project.completed_stages >= 6 && !revoked && (
+          <a className="pc-link-btn" href={project.artifactUrl} target="_blank" rel="noreferrer" title={project.artifactUrl} onClick={(e) => e.stopPropagation()}>
+            ⬇ 下载安装包
           </a>
         )}
       </div>

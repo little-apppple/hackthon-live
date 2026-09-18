@@ -506,3 +506,43 @@ a { color: var(--txt-bright); text-decoration: none; transition: all 0.2s ease; 
 .pool-edit-row input:focus { border-color: var(--red); }
 .pool-dash { color: var(--txt-dim); font-size: 18px; padding-bottom: 10px; }
 .pool-err { margin-top: 10px; }
+
+/* ---- 项目详情弹层（注册信息展示）---- */
+.detail-mask {
+  position: absolute; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.82);
+  display: flex; align-items: center; justify-content: center;
+  animation: noticeIn .24s ease;
+}
+.detail-card {
+  width: 880px; max-height: 780px; overflow-y: auto;
+  background: linear-gradient(170deg, #0d0d0d, #060606);
+  border: 1px solid rgba(194, 59, 34, 0.45); border-radius: 8px;
+  padding: 26px 32px; box-shadow: 0 0 70px rgba(194, 59, 34, 0.12);
+}
+.detail-card::-webkit-scrollbar { width: 6px; }
+.detail-card::-webkit-scrollbar-thumb { background: rgba(194, 59, 34, 0.35); }
+.detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.detail-name { font-size: 28px; font-weight: 700; color: var(--white); }
+.detail-meta { margin-top: 6px; font-size: 14px; color: var(--txt-dim); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.detail-chip {
+  font-family: var(--font-mono); font-size: 11px; color: var(--txt);
+  border: 1px solid var(--line); border-radius: 4px; padding: 1px 7px;
+}
+.detail-chip.red { color: var(--white); background: rgba(194, 59, 34, 0.7); border-color: transparent; }
+.detail-close { background: transparent; border: 1px solid var(--line); color: var(--txt-dim); border-radius: 4px; padding: 2px 10px; font-size: 15px; }
+.detail-close:hover { color: var(--white); border-color: var(--red); }
+.detail-progress { margin: 16px 0 10px; font-family: var(--font-mono); font-size: 14px; color: var(--txt); }
+.detail-row { display: flex; gap: 16px; padding: 11px 0; border-top: 1px dashed var(--line-dim); }
+.detail-label { flex-shrink: 0; width: 92px; font-size: 14px; color: var(--red-hot); letter-spacing: 1px; }
+.detail-value { flex: 1; font-size: 16px; color: var(--txt-bright); line-height: 1.65; white-space: pre-wrap; }
+.detail-empty { padding: 18px 0; color: var(--txt-faint); font-size: 15px; }
+.detail-actions { margin-top: 20px; display: flex; gap: 12px; align-items: center; }
+.detail-link {
+  background: var(--red); color: var(--white); font-weight: 700; font-size: 15px;
+  padding: 10px 22px; border-radius: 4px;
+}
+.detail-link:hover { background: var(--red-hot); }
+.detail-note { color: var(--txt-faint); font-size: 14px; }
+.submitted-item { cursor: pointer; }
+.submitted-item:hover { background: rgba(194, 59, 34, 0.12); }
+.project-card { cursor: pointer; }

@@ -1,7 +1,7 @@
 import React from 'react';
 
 // 已提交作品列表：项目完成最终提交后进入此榜，按提交时间倒序
-export default function SubmittedList({ items }) {
+export default function SubmittedList({ items, onOpenDetail }) {
   const list = items || [];
   return (
     <div className="submitted-panel">
@@ -12,7 +12,7 @@ export default function SubmittedList({ items }) {
       <div className="submitted-list">
         {list.length === 0 && <div className="submitted-empty">尚无作品完成最终提交</div>}
         {list.map((p, i) => (
-          <div className="submitted-item" key={p.projectId}>
+          <div className="submitted-item" key={p.projectId} onClick={() => onOpenDetail && onOpenDetail(p)} title="点击查看项目详情">
             <span className="submitted-rank">{String(i + 1).padStart(2, '0')}</span>
             <div className="submitted-info">
               <div className="submitted-name" title={p.name}>
@@ -29,9 +29,16 @@ export default function SubmittedList({ items }) {
                 )}
               </div>
             </div>
-            {p.link && (
-              <a className="submitted-link" href={p.link} target="_blank" rel="noreferrer" title={p.link}>
-                打开
+            {(p.artifactUrl || p.link) && (
+              <a
+                className="submitted-link"
+                href={p.artifactUrl || p.link}
+                target="_blank"
+                rel="noreferrer"
+                title={p.artifactUrl || p.link}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {p.deliverable === 'package' ? '下载' : '打开'}
               </a>
             )}
           </div>

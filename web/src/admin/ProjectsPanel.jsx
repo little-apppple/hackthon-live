@@ -13,6 +13,7 @@ export default function ProjectsPanel({ eventId }) {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [created, setCreated] = useState(null);
+  const [detailProject, setDetailProject] = useState(null);
   const [msg, setMsg] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
   const [poolEdit, setPoolEdit] = useState(null);
@@ -98,6 +99,7 @@ export default function ProjectsPanel({ eventId }) {
     <div className="projects-panel">
       {msg && <div className={`toast ${msg.ok ? 'ok' : 'bad'}`}>{msg.text}</div>}
       {created && <CreatedModal info={created} onClose={() => setCreated(null)} />}
+      {detailProject && <ProjectInfoModal project={detailProject} onClose={() => setDetailProject(null)} />}
 
       {pool && (
         <div className="pool-strip">
@@ -211,6 +213,7 @@ export default function ProjectsPanel({ eventId }) {
               <th>部门</th>
               <th>小组</th>
               <th>项目</th>
+              <th>详情</th>
               <th>客户端</th>
               <th>端口</th>
               <th>进度</th>
@@ -241,6 +244,9 @@ export default function ProjectsPanel({ eventId }) {
                   ) : (
                     <span className="dim-cell">未绑定</span>
                   )}
+                </td>
+                <td>
+                  <button className="op" onClick={() => setDetailProject(p)}>查看</button>
                 </td>
                 <td className="mono">{p.port}</td>
                 <td>
@@ -384,6 +390,30 @@ function CreatedModal({ info, onClose }) {
           </button>
           <button onClick={onClose}>完成</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectInfoModal({ project, onClose }) {
+  const rows = [
+    ['参与人员', project.members],
+    ['需求简述', project.summary],
+    ['项目价值', project.value],
+    ['核心功能', project.features],
+    ['应用场景', project.scenario],
+  ];
+  return (
+    <div className="modal-mask" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <h2>{project.name}</h2>
+        <div className="kv"><span>部门 · 小组</span><b>{project.department_name} · {project.group_name}</b></div>
+        <div className="kv"><span>交付形态</span><b>{project.deliverable === 'package' ? '安装包下载' : 'Web 应用'}</b></div>
+        {rows.map(([k, v]) => (
+          <div className="kv" key={k}><span>{k}</span><b>{v || '—'}</b></div>
+        ))}
+        {project.ai_score != null && <div className="kv"><span>AI 参考分</span><b>{project.ai_score} / 85（主观 15 分待评审）</b></div>}
+        <div className="modal-actions"><button onClick={onClose}>关闭</button></div>
       </div>
     </div>
   );

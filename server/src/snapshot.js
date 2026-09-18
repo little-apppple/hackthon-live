@@ -37,7 +37,8 @@ function buildSnapshot(eventId) {
   const projects = db
     .prepare(
       `SELECT id, group_id, name, description, port, completed_stages, loop_count,
-              status, revoked, last_report_at, created_at
+              status, revoked, last_report_at, created_at,
+              members, summary, value, features, scenario, deliverable, artifact_name
          FROM projects
         WHERE event_id = ? AND archived = 0
         ORDER BY id`
@@ -48,6 +49,7 @@ function buildSnapshot(eventId) {
   for (const p of projects) {
     p.progress = progressPercent(p.completed_stages);
     p.link = config.publicHost ? `http://${config.publicHost}:${p.port}` : null;
+    p.artifactUrl = p.deliverable === 'package' && p.artifact_name && config.publicHost ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null;
     if (!projectsByGroup.has(p.group_id)) projectsByGroup.set(p.group_id, []);
     projectsByGroup.get(p.group_id).push(p);
   }
@@ -122,6 +124,7 @@ function buildSnapshot(eventId) {
   const submittedProjects = db
     .prepare(
       `SELECT p.id AS projectId, p.name, p.loop_count, p.port, p.last_report_at, p.ai_score, p.ai_scored_at,
+              p.members, p.summary, p.value, p.features, p.scenario, p.deliverable, p.artifact_name,
               g.name AS grp, d.name AS department
          FROM projects p
          JOIN groups g ON g.id = p.group_id
@@ -130,7 +133,11 @@ function buildSnapshot(eventId) {
         ORDER BY p.last_report_at DESC, p.id DESC`
     )
     .all(eid)
-    .map((p) => ({ ...p, link: config.publicHost ? `http://${config.publicHost}:${p.port}` : null }));
+    .map((p) => ({
+      ...p,
+      link: config.publicHost ? `http://${config.publicHost}:${p.port}` : null,
+      artifactUrl: p.deliverable === 'package' && p.artifact_name && config.publicHost ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null,
+    }));
 
   return {
     eventId: eid,

@@ -7,6 +7,7 @@ import Spotlight from './Spotlight.jsx';
 import EventFeed from './EventFeed.jsx';
 import SubmittedList from './SubmittedList.jsx';
 import NotificationCenter from './NotificationCenter.jsx';
+import ProjectDetail from './ProjectDetail.jsx';
 
 const ASCII_LOGO = String.raw`
  _   _ _____ _   _ _____ _    _   _ ___ ___
@@ -18,6 +19,7 @@ const ASCII_LOGO = String.raw`
 
 export default function Dashboard() {
   const { snapshot, connected } = useSnapshot();
+  const [detail, setDetail] = React.useState(null);
 
   if (!snapshot) {
     return (
@@ -53,15 +55,16 @@ export default function Dashboard() {
         <div className="dash-body">
           <main className="dash-main">
             <KpiBar kpi={snapshot.kpi} />
-            <DeptGrid departments={snapshot.departments} stages={snapshot.stages} />
+            <DeptGrid departments={snapshot.departments} stages={snapshot.stages} onOpenDetail={setDetail} />
           </main>
           <aside className="dash-side">
             <Spotlight loadingProjects={snapshot.loadingProjects} />
-            <SubmittedList items={snapshot.submittedProjects} />
+            <SubmittedList items={snapshot.submittedProjects} onOpenDetail={setDetail} />
             <EventFeed events={snapshot.events} />
           </aside>
         </div>
       </div>
+      <ProjectDetail project={detail} stages={snapshot.stages} onClose={() => setDetail(null)} />
       <NotificationCenter
         events={snapshot.events}
         stages={snapshot.stages}
