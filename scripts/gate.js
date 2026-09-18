@@ -79,6 +79,7 @@ function runSuite(name, args, { env = {}, cwd = ROOT } = {}) {
   runSuite('verify-e2e', ['scripts/verify-e2e.js']);
   runSuite('deploy-e2e', ['scripts/deploy-e2e.js']);
   runSuite('skill-e2e', ['scripts/skill-e2e.js']);
+  runSuite('migrate-e2e', ['scripts/migrate-e2e.js']);
 
   const totalPassed = results.reduce((s, r) => s + (r.passed || 0), 0);
   const totalFailed = results.reduce((s, r) => s + (r.failed || 0), 0);

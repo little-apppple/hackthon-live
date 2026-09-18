@@ -17,7 +17,14 @@ function parseCookies(req) {
   const out = {};
   for (const part of header.split(';')) {
     const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    if (i > 0) {
+      const raw = part.slice(i + 1).trim();
+      try {
+        out[part.slice(0, i).trim()] = decodeURIComponent(raw);
+      } catch {
+        out[part.slice(0, i).trim()] = raw; // 畸形编码按原值处理，不能让整条请求失败
+      }
+    }
   }
   return out;
 }

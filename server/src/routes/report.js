@@ -174,17 +174,18 @@ let lastHitNotifyAt = 0; // 人气广播节流（最多每 2 秒一次）
 
 // 人气上报限频：每终端与每 IP 双预算（NAT/同一出口 IP 下不会互相挤占），均可配置
 const hitAttempts = new Map(); // key -> epoch ms 数组（key = `t:<terminal>` 或 `ip:<ip>`）
-function overBudget(key, limit) {
+
+// 预算查询与消耗分离：先看是否超限，确认要计数时才消耗——避免被拒请求吃掉共享的 IP 预算
+function budgetExceeded(key, limit) {
   if (!limit || limit <= 0) return false;
   const now = Date.now();
+  return (hitAttempts.get(key) || []).filter((t) => now - t < 60 * 1000).length >= limit;
+}
+function budgetConsume(key) {
+  const now = Date.now();
   const arr = (hitAttempts.get(key) || []).filter((t) => now - t < 60 * 1000);
-  if (arr.length >= limit) {
-    hitAttempts.set(key, arr);
-    return true;
-  }
   arr.push(now);
   hitAttempts.set(key, arr);
-  return false;
 }
 setInterval(() => {
   const now = Date.now();
@@ -524,39 +525,55 @@ function setTerminalCookie(res, terminal) {
 
 // 校验项目可用于计数（存在、未归档、未吊销、属于当前活动），返回 { project } 或 { error }
 function hitTarget(projectId) {
-  const project = db.prepare('SELECT id, revoked, archived, event_id, port, deliverable, artifact_name FROM projects WHERE id = ?').get(projectId);
+  const project = db
+    .prepare('SELECT id, revoked, archived, event_id, port, deliverable, artifact_name, completed_stages FROM projects WHERE id = ?')
+    .get(projectId);
   const active = getActiveEvent();
   if (!project || project.archived || project.event_id !== active.id) return { error: 404, code: 'INVALID_PROJECT', message: '项目不存在' };
   if (project.revoked) return { error: 403, code: 'KEY_REVOKED', message: '该项目已被吊销，不计人气' };
+  // 未到「上线部署」节点（或被归档的旧部署）没有可用链接，不应计数、也没有可跳转目标
+  if ((project.completed_stages || 0) < DEPLOY_STAGE_INDEX) {
+    return { error: 409, code: 'NOT_DEPLOYED', message: `项目尚未上线部署（当前 ${project.completed_stages}/${STAGES.length}），暂不计人气` };
+  }
+  if (project.deliverable === 'package' && !project.artifact_name) {
+    return { error: 409, code: 'NOT_DEPLOYED', message: '安装包尚未上传，暂不计人气' };
+  }
   return { project };
 }
 
 // 人气值：点击上报（大屏上点击「打开项目」或「下载安装包」时触发）
 // 去重规则：同一终端对同一项目，在 hitWindowMs（默认 60 秒）内的多次点击只计一次
 router.post('/hit', (req, res) => {
-  const ip = req.ip || '';
-  // 终端标识：Cookie（每浏览器实例一个）→ 请求体（兼容）→ 新签发随机终端。
-  // IP 只用于限频，**不参与去重**——同一公网 IP 下多终端（会场 wifi/NAT）必须各算一次。
-  const cookieTerminal = parseCookies(req).hk_term;
-  const bodyTerminal = String(req.body?.terminal ?? '').trim().slice(0, 64);
-  const given = [cookieTerminal, bodyTerminal].find((v) => /^t_[a-z0-9_]{6,40}$/.test(v || ''));
-  const terminal = given || `t_${crypto.randomBytes(12).toString('hex')}`;
-  if (!given) setTerminalCookie(res, terminal); // 首次访问即签发，后续请求自动携带
-  if (overBudget(`t:${terminal}`, config.hitRatePerTerminal) || overBudget(`ip:${ip}`, config.hitRatePerIp)) {
-    return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: '点击上报过于频繁' });
-  }
   const projectId = Number(req.body?.projectId);
   if (!Number.isInteger(projectId) || projectId <= 0) {
     return res.status(400).json({ ok: false, code: 'INVALID_PROJECT', error: '缺少有效的 projectId' });
   }
-  const kind = req.body?.kind === 'package' ? 'package' : 'web';
+  // 校验先于限频：被拒请求不消耗限频预算（与 /report 的约定一致）
   const target = hitTarget(projectId);
   if (target.error) return res.status(target.error).json({ ok: false, code: target.code, error: target.message });
 
+  // 终端标识只用服务端签发的 Cookie（前端已改为跳转端点，不再自报标识）——避免任意伪造 t_xxx 刷人气
+  const cookieTerminal = parseCookies(req).hk_term;
+  const given = /^t_[a-z0-9_]{6,40}$/.test(cookieTerminal || '') ? cookieTerminal : '';
+  const terminal = given || `t_${crypto.randomBytes(12).toString('hex')}`;
+  if (!given) setTerminalCookie(res, terminal);
+
+  const ip = req.ip || '';
+  // 两个预算都求值（不做短路），避免口径不一致
+  const overT = budgetExceeded(`t:${terminal}`, config.hitRatePerTerminal);
+  const overIp = budgetExceeded(`ip:${ip}`, config.hitRatePerIp);
+  if (overT || overIp) {
+    return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: '点击上报过于频繁' });
+  }
+  const kind = req.body?.kind === 'package' ? 'package' : 'web';
   const { counted, hits } = countHit(projectId, terminal, kind);
-  if (counted && Date.now() - lastHitNotifyAt > 2000) {
-    lastHitNotifyAt = Date.now();
-    notifyRefresh('hit');
+  if (counted) {
+    budgetConsume(`t:${terminal}`);
+    budgetConsume(`ip:${ip}`);
+    if (Date.now() - lastHitNotifyAt > 2000) {
+      lastHitNotifyAt = Date.now();
+      notifyRefresh('hit');
+    }
   }
   res.json({ ok: true, counted, hits, windowMs: config.hitWindowMs });
 });
@@ -568,25 +585,35 @@ router.get('/hit/go', (req, res) => {
   if (!Number.isInteger(projectId) || projectId <= 0) {
     return res.status(400).json({ ok: false, code: 'INVALID_PROJECT', error: '缺少有效的 projectId' });
   }
-  const ip = req.ip || '';
-  const cookieTerminal = parseCookies(req).hk_term;
-  const given = /^t_[a-z0-9_]{6,40}$/.test(cookieTerminal || '') ? cookieTerminal : '';
-  const terminal = given || `t_${crypto.randomBytes(12).toString('hex')}`;
-  if (!given) setTerminalCookie(res, terminal);
-
   const target = hitTarget(projectId);
-  if (target.error) return res.status(target.error).json({ ok: false, code: target.code, error: target.message });
+  // 未部署/已吊销/不存在：跳回大屏（评委不会落到死端口），并给出原因
+  if (target.error) {
+    if (target.error === 409) return res.redirect(302, '/');
+    return res.status(target.error).json({ ok: false, code: target.code, error: target.message });
+  }
   const project = target.project;
   const isPkg = project.deliverable === 'package' && project.artifact_name;
   const dest = isPkg
     ? `http://${config.publicHost}:${project.port}/${encodeURIComponent(project.artifact_name)}`
     : `http://${config.publicHost}:${project.port}`;
 
-  if (!overBudget(`t:${terminal}`, config.hitRatePerTerminal) && !overBudget(`ip:${ip}`, config.hitRatePerIp)) {
+  const cookieTerminal = parseCookies(req).hk_term;
+  const given = /^t_[a-z0-9_]{6,40}$/.test(cookieTerminal || '') ? cookieTerminal : '';
+  const terminal = given || `t_${crypto.randomBytes(12).toString('hex')}`;
+  if (!given) setTerminalCookie(res, terminal);
+
+  const ip = req.ip || '';
+  const overT = budgetExceeded(`t:${terminal}`, config.hitRatePerTerminal);
+  const overIp = budgetExceeded(`ip:${ip}`, config.hitRatePerIp);
+  if (!overT && !overIp) {
     const { counted } = countHit(projectId, terminal, isPkg ? 'package' : 'web');
-    if (counted && Date.now() - lastHitNotifyAt > 2000) {
-      lastHitNotifyAt = Date.now();
-      notifyRefresh('hit');
+    if (counted) {
+      budgetConsume(`t:${terminal}`);
+      budgetConsume(`ip:${ip}`);
+      if (Date.now() - lastHitNotifyAt > 2000) {
+        lastHitNotifyAt = Date.now();
+        notifyRefresh('hit');
+      }
     }
   }
   res.redirect(302, dest);

@@ -511,41 +511,7 @@ async function api(method, path, body, useAuth = true) {
   console.log(`\n== 15. 人气值（点击统计与去重）==`);
   {
     // 窗口由 HIT_WINDOW_MS 配置（gate/smoke 场景下服务端设为 1000ms 便于验证过期）
-    const hit = (body) => api('POST', '/api/hit', body, false);
-    const me = (await api('GET', '/api/admin/projects')).data.projects.find((p) => p.id === created[0].id);
-
-    const bad = await hit({ projectId: 'abc' });
-    check('非法 projectId 400', bad.status === 400 && bad.data.code === 'INVALID_PROJECT');
-    const missing = await hit({ projectId: 999999, terminal: 't1' });
-    check('不存在的项目 404', missing.status === 404);
-
-    const t1 = `t_smoke_${Date.now()}`;
-    const h1 = await hit({ projectId: created[0].id, terminal: t1, kind: 'web' });
-    check('首次点击计入人气', h1.data.ok && h1.data.counted === true && h1.data.hits >= 1, JSON.stringify(h1.data));
-    const h2 = await hit({ projectId: created[0].id, terminal: t1, kind: 'web' });
-    check('同终端窗口内重复点击不计数', h2.data.ok && h2.data.counted === false && h2.data.hits === h1.data.hits, JSON.stringify(h2.data));
-    const h3 = await hit({ projectId: created[0].id, terminal: `${t1}_other`, kind: 'package' });
-    check('不同终端点击分别计数', h3.data.ok && h3.data.counted === true && h3.data.hits === h1.data.hits + 1, JSON.stringify(h3.data));
-    const noTerminal = await hit({ projectId: created[0].id, kind: 'web' });
-    const noTerminal2 = await hit({ projectId: created[0].id, kind: 'web' });
-    check('无 Cookie 客户端分别计数（IP 不参与去重，NAT 安全）', noTerminal.data.counted === true && noTerminal2.data.counted === true, JSON.stringify({ a: noTerminal.data, b: noTerminal2.data }));
-
-    await new Promise((r) => setTimeout(r, 1200)); // 超过去重窗口
-    const h4 = await hit({ projectId: created[0].id, terminal: t1, kind: 'web' });
-    check('窗口过期后再次点击重新计数', h4.data.ok && h4.data.counted === true && h4.data.hits === noTerminal2.data.hits + 1, JSON.stringify(h4.data));
-
-    const snap = await api('GET', '/api/snapshot', undefined, false);
-    const mine = snap.data.snapshot.departments.flatMap((d) => d.groups.flatMap((g) => g.projects)).find((p) => p.id === created[0].id);
-    check('快照项目带人气值', mine?.hits === h4.data.hits, `snapshot=${mine?.hits} api=${h4.data.hits}`);
-    check('快照提供人气榜与总人气', Array.isArray(snap.data.snapshot.hotProjects) && snap.data.snapshot.kpi.totalHits >= h4.data.hits, JSON.stringify(snap.data.snapshot.kpi));
-    check('人气榜按点击数排序且含本项目', snap.data.snapshot.hotProjects[0]?.projectId === created[0].id, JSON.stringify(snap.data.snapshot.hotProjects[0]));
-
-    const byKey = await fetch(base + '/api/hits', { headers: { 'x-access-key': key1 } });
-    const byKeyBody = await byKey.json();
-    check('按 accessKey 查询人气值', byKey.status === 200 && typeof byKeyBody.hits === 'number', JSON.stringify(byKeyBody));
-    const meAfter = (await api('GET', '/api/admin/projects')).data.projects.find((p) => p.id === created[0].id);
-    check('管理端项目列表带人气值', typeof meAfter.hits === 'number' && meAfter.hits === h4.data.hits, `admin=${meAfter.hits} api=${h4.data.hits}`);
-    // ---- 终端身份：Cookie 优先，IP 不参与去重（NAT 下多终端各算一次）----
+    // 人气请求一律带 Cookie 语义：同一 cookie 串 = 同一终端（服务端签发）
     const cookieHit = async (cookie, body) =>
       fetch(base + '/api/hit', {
         method: 'POST',
@@ -553,29 +519,102 @@ async function api(method, path, body, useAuth = true) {
         body: JSON.stringify(body),
       }).then(async (r) => ({ status: r.status, data: await r.json().catch(() => null), setCookie: r.headers.get('set-cookie') }));
 
-    const firstNoCookie = await cookieHit('', { projectId: created[0].id });
-    const cookieA = (firstNoCookie.setCookie || '').split(';')[0];
-    check('无 Cookie 时签发随机终端 Cookie（hk_term=t_…）', /^hk_term=t_[a-z0-9]+$/.test(cookieA), cookieA);
-    const repeatA = await cookieHit(cookieA, { projectId: created[0].id });
-    check('同终端窗口内重复点击不计数', repeatA.data?.counted === false, JSON.stringify(repeatA.data));
+    const bad = await cookieHit('', { projectId: 'abc' });
+    check('非法 projectId 400', bad.status === 400 && bad.data.code === 'INVALID_PROJECT');
+    const missing = await cookieHit('', { projectId: 999999 });
+    check('不存在的项目 404', missing.status === 404);
 
-    // 同一 IP 的第二台终端：拿到的 Cookie 必须不同，且能独立计数
-    const second = await cookieHit('', { projectId: created[0].id });
-    const cookieB = (second.setCookie || '').split(';')[0];
-    check('同 IP 第二终端获得不同 Cookie 且独立计数', !!cookieB && cookieB !== cookieA && second.data?.counted === true, JSON.stringify({ cookieB, counted: second.data?.counted }));
-    const hitsAfterSecond = second.data?.hits;
+    // 终端 A：首次请求签发 Cookie 并计数，同终端窗口内重复点击不计数
+    const firstA = await cookieHit('', { projectId: created[0].id, kind: 'web' });
+    const cookieA = (firstA.setCookie || '').split(';')[0];
+    check('首次点击计入人气并签发终端 Cookie', firstA.data?.counted === true && /^hk_term=t_[a-z0-9]+$/.test(cookieA), JSON.stringify({ counted: firstA.data?.counted, cookieA }));
+    const repeatA = await cookieHit(cookieA, { projectId: created[0].id, kind: 'web' });
+    check('同终端窗口内重复点击不计数', repeatA.data?.counted === false && repeatA.data.hits === firstA.data.hits, JSON.stringify(repeatA.data));
+
+    // 终端 B：与 A 同一 IP，但持有不同 Cookie —— 必须独立计数（NAT 场景核心诉求）
+    const firstB = await cookieHit('', { projectId: created[0].id, kind: 'package' });
+    const cookieB = (firstB.setCookie || '').split(';')[0];
+    check('同 IP 第二终端获得不同 Cookie 且独立计数', !!cookieB && cookieB !== cookieA && firstB.data?.counted === true, JSON.stringify({ cookieB, counted: firstB.data?.counted }));
+    const hitsTwoTerminals = firstB.data.hits;
     const repeatB = await cookieHit(cookieB, { projectId: created[0].id });
     check('第二终端自身窗口内重复点击不计数', repeatB.data?.counted === false);
 
+    // 终端 C：无 Cookie 客户端（每次新身份）也各自计数 —— IP 不参与去重
+    const noCookie1 = await cookieHit('', { projectId: created[0].id });
+    const noCookie2 = await cookieHit('', { projectId: created[0].id });
+    check('无 Cookie 客户端分别计数（NAT 安全）', noCookie1.data?.counted === true && noCookie2.data?.counted === true, JSON.stringify({ a: noCookie1.data, b: noCookie2.data }));
+
+    // 窗口过期后可再次计数
+    await new Promise((r) => setTimeout(r, 1200)); // HIT_WINDOW_MS=1000（gate 配置）
+    const afterWindow = await cookieHit(cookieA, { projectId: created[0].id, kind: 'web' });
+    check('窗口过期后同终端重新计数', afterWindow.data?.counted === true && afterWindow.data.hits === noCookie2.data.hits + 1, JSON.stringify(afterWindow.data));
+
+    const snap = await api('GET', '/api/snapshot', undefined, false);
+    const mine = snap.data.snapshot.departments.flatMap((d) => d.groups.flatMap((g) => g.projects)).find((p) => p.id === created[0].id);
+    check('快照项目带人气值', mine?.hits === afterWindow.data.hits, `snapshot=${mine?.hits} api=${afterWindow.data.hits}`);
+    check('快照提供人气榜与总人气', Array.isArray(snap.data.snapshot.hotProjects) && snap.data.snapshot.kpi.totalHits >= afterWindow.data.hits, JSON.stringify(snap.data.snapshot.kpi));
+    check('人气榜按点击数排序且含本项目', snap.data.snapshot.hotProjects[0]?.projectId === created[0].id, JSON.stringify(snap.data.snapshot.hotProjects[0]));
+
+    const byKey = await fetch(base + '/api/hits', { headers: { 'x-access-key': key1 } });
+    const byKeyBody = await byKey.json();
+    check('按 accessKey 查询人气值', byKey.status === 200 && typeof byKeyBody.hits === 'number', JSON.stringify(byKeyBody));
+    const meAfter = (await api('GET', '/api/admin/projects')).data.projects.find((p) => p.id === created[0].id);
+    check('管理端项目列表带人气值', typeof meAfter.hits === 'number' && meAfter.hits === afterWindow.data.hits, `admin=${meAfter.hits} api=${afterWindow.data.hits}`);
     // 跳转端点（不依赖前端 JS）：带已有 Cookie 去重，新终端则计数
     const goSameTerminal = await fetch(`${base}/api/hit/go?projectId=${created[0].id}`, { redirect: 'manual', headers: { Cookie: cookieB } });
     check('跳转端点 302 到项目地址', goSameTerminal.status === 302 && /^http:\/\/localhost:\d+/.test(goSameTerminal.headers.get('location') || ''), `${goSameTerminal.status} ${goSameTerminal.headers.get('location')}`);
+    const hitsBeforeGo = (await (await fetch(base + '/api/hits')).json()).projects.find((p) => p.projectId === created[0].id)?.hits;
     const goNewTerminal = await fetch(`${base}/api/hit/go?projectId=${created[0].id}`, { redirect: 'manual' });
     const hitsNow = await (await fetch(base + '/api/hits')).json();
     const mineNow = hitsNow.projects.find((p) => p.projectId === created[0].id);
-    check('跳转端点新终端计入人气（计数递增）', goNewTerminal.status === 302 && mineNow?.hits === hitsAfterSecond + 1, JSON.stringify({ hits: mineNow?.hits, expected: hitsAfterSecond + 1 }));
+    check('跳转端点新终端计入人气（计数递增）', goNewTerminal.status === 302 && mineNow?.hits === hitsBeforeGo + 1, JSON.stringify({ hits: mineNow?.hits, expected: hitsBeforeGo + 1 }));
     const goBad = await fetch(`${base}/api/hit/go`, { redirect: 'manual' });
     check('跳转端点缺 projectId 400', goBad.status === 400);
+    // ---- 边界与防滥用回归（评审 P1 对应）----
+    // 未部署项目（0/8）：不应计数，也不应跳到死端口
+    const freshProj = await api('POST', '/api/admin/projects', { groupId: groupIds[0], name: '未部署人气用例' });
+    const notDeployed = await api('POST', '/api/hit', { projectId: freshProj.data.id }, false);
+    check('未到部署节点不计人气（409 NOT_DEPLOYED）', notDeployed.status === 409 && notDeployed.data.code === 'NOT_DEPLOYED', JSON.stringify(notDeployed.data));
+    const goNotDeployed = await fetch(`${base}/api/hit/go?projectId=${freshProj.data.id}`, { redirect: 'manual' });
+    check('未部署项目的跳转回到大屏（不落死端口）', goNotDeployed.status === 302 && goNotDeployed.headers.get('location') === '/', `${goNotDeployed.status} ${goNotDeployed.headers.get('location')}`);
+
+    // 吊销项目不计人气
+    await api('POST', `/api/admin/projects/${freshProj.data.id}/revoke`);
+    const revokedHit = await api('POST', '/api/hit', { projectId: freshProj.data.id }, false);
+    check('已吊销项目不计人气（403）', revokedHit.status === 403 && revokedHit.data.code === 'KEY_REVOKED', JSON.stringify(revokedHit.data));
+    await api('POST', `/api/admin/projects/${freshProj.data.id}/restore`);
+
+    // 归档项目 404
+    const archProj = await api('POST', '/api/admin/projects', { groupId: groupIds[0], name: '归档人气用例' });
+    await api('POST', `/api/admin/projects/${archProj.data.id}/archive`);
+    const archivedHit = await api('POST', '/api/hit', { projectId: archProj.data.id }, false);
+    check('已归档项目不计人气（404）', archivedHit.status === 404, JSON.stringify(archivedHit.data));
+
+    // 无效请求不得消耗限频预算（否则同 NAT 出口的其他终端会被连坐停计）
+    let invalidStatuses = [];
+    for (let i = 0; i < 12; i++) invalidStatuses.push((await api('POST', '/api/hit', { projectId: 'abc' }, false)).status);
+    check('无效请求返回 400 且不消耗预算', invalidStatuses.every((s) => s === 400), JSON.stringify(invalidStatuses));
+    const stillWorks = await api('POST', '/api/hit', { projectId: created[0].id }, false);
+    check('大量无效请求后合法计数仍可用（预算未被吃掉）', stillWorks.status === 200 && stillWorks.data.ok, JSON.stringify(stillWorks.data));
+
+    // 畸形 Cookie 不应 500（parseCookies 健壮性）
+    const malformed = await fetch(base + '/api/hit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: 'hk_term=%ZZ%' },
+      body: JSON.stringify({ projectId: created[0].id }),
+    });
+    check('畸形 Cookie 不导致 500', malformed.status === 200 || malformed.status === 429, `HTTP ${malformed.status}`);
+
+    // 快照请求会签发终端 Cookie（评委进大屏即获得身份）
+    const snapRes = await fetch(base + '/api/snapshot');
+    check('快照响应签发终端 Cookie', /^hk_term=t_/.test((snapRes.headers.get('set-cookie') || '').split(';')[0]), snapRes.headers.get('set-cookie') || '(无)');
+
+    // 清理
+    await api('POST', `/api/admin/projects/${freshProj.data.id}/archive`);
+    await api('DELETE', `/api/admin/projects/${freshProj.data.id}`);
+    await api('DELETE', `/api/admin/projects/${archProj.data.id}`);
+    check('人气边界用例项目已清理', true);
+
 
   }
 

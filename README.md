@@ -62,6 +62,7 @@ npm start              # 启动服务（默认 http://localhost:3000）
 ```bash
 npm test               # 回归闸门：一键跑完下面全部套件（smoke + 三套 E2E），任一失败即退出非 0
 npm run demo           # 生成各阶段混合的演示项目数据（开发/演示用）
+npm run migrate:e2e    # 旧库迁移回归（构造 legacy 库 → 迁移 → 断言快照/后台可用、数据保留）
 npm run smoke          # 端到端冒烟测试（104 项断言：认证/CSV/上报强约束/探活/吊销/端口复用/审计/活动隔离/端口区间/自助注册/loop 迭代/最终提交）
 npm run verify:e2e     # 验收自动化端到端测试（通过/失败/未部署三条路径）
 npm run skill:e2e      # 参赛技能包全旅程端到端测试（打包→解压→doctor→自助注册→八节点→部署→验收→loop→终审）
@@ -141,7 +142,7 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 - **点击入口**：大屏按钮指向同源端点 `GET /api/hit/go?projectId=N`——服务端计数后 302 跳到真实地址，**禁用 JS 或直接点链也会计数**；
 - **展示**：项目卡显示「人气 n」、右侧**人气榜**（前 5 名 + 进度条 + 全部项目合计）、管理端项目表同步显示；快照 `kpi.totalHits` 为全场人气合计；
 - **存储**：`projects.hits` 冗余计数（读快照即可，无需聚合）；明细在 `hit_events` 表（仅用于窗口去重，定期清理超过窗口 10 倍或 1 小时以上的记录）；
-- **限频**：每 IP 每分钟 60 次上报，超出返回 429（静默失败不影响跳转）。
+- **限频与防滥用**：每终端 30 次/分、每 IP 600 次/分（仅限频、不参与去重）；**校验先于限频**，无效请求不消耗预算，避免同一出口 IP 被连坐；未到「上线部署」节点的项目不计数（`409 NOT_DEPLOYED`）；终端标识只认服务端签发的 Cookie（前端不再自报，防止伪造刷量）。
 
 ## 交付形态与注册信息
 
@@ -202,7 +203,7 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 | POST | `/api/register` | 自助注册：`{department, group, project, clientId, registerToken, description?}` → 录入名单+预留端口+发 accessKey；**以 clientId 幂等**（同一 clientId 重跑返回同一 key，换名亦然）；不同 clientId 撞同名 → 409 `NAME_TAKEN`。需本期注册令牌（管理员 `/api/admin/register-token` 签发）；错误码 `INVALID_PARAMS` / `INVALID_CLIENT_ID` / `REGISTER_TOKEN_INVALID` / `NAME_TAKEN` / `NO_FREE_PORT` / `PORT_CONFLICT`，每 IP 限频 10 次/分钟（按直连 IP 计，勿置于无 realip 配置的反向代理之后） |
 | POST | `/api/deploy?type=package&file=<包名>` | 非 Web 应用：上传安装包（raw body），服务端在预留端口发布下载链接（落地页 + 附件下载），下载可用即视为部署完成 |
 | POST | `/api/hit` | 人气上报（JS 可选路径）：`{projectId, terminal?, kind?}`——按「终端 + 项目 + `HIT_WINDOW_MS`」去重；终端取 Cookie `hk_term` 或请求体，缺失时当场签发；每终端 30 次/分、每 IP 600 次/分限频 |
-| GET | `/api/hit/go?projectId=` | 人气 + 跳转：计数后 302 到项目线上地址（安装包交付则直达安装包），不依赖前端 JS |
+| GET | `/api/hit/go?projectId=` | 人气 + 跳转：计数后 302 到项目线上地址（安装包交付则直达安装包），不依赖前端 JS；未部署/已吊销项目不计数并跳回大屏 |
 | GET | `/api/hits` | 查询人气值：带 `x-access-key` 返回单项目，否则返回当前活动人气前 20 |
 | POST | `/api/score` | AI 参考评分上报（**仅最终提交后**）：`{accessKey, score(0-100), detail}`，参数错误 `INVALID_SCORE`(400)/未提交 `SCORE_NOT_ALLOWED`(409)；评分规范见 docs/AI-SCORING.md |
 | GET | `/api/score` | 查询已存档的参考分与明细（`x-access-key` 请求头） |

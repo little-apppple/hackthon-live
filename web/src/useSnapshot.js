@@ -6,9 +6,13 @@ export function useSnapshot() {
   const [snapshot, setSnapshot] = useState(null);
   const [connected, setConnected] = useState(false);
   const fetching = useRef(false);
+  const pendingRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    if (fetching.current) return;
+    if (fetching.current) {
+      pendingRef.current = true; // 有请求在飞行：记下，等它回来补一次
+      return;
+    }
     fetching.current = true;
     try {
       const { ok, data } = await api.get('/api/snapshot');
@@ -17,6 +21,10 @@ export function useSnapshot() {
       /* 网络抖动，等下次信号 */
     } finally {
       fetching.current = false;
+      if (pendingRef.current) {
+        pendingRef.current = false;
+        load(); // 尾随重取：不丢这次刷新信号
+      }
     }
   }, []);
 
