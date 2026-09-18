@@ -155,7 +155,7 @@ async function reportStage(configFile, stage) {
     const v1 = await runCli(['--config', 'config-pass.json', '--verify'], TMP);
     check('--verify 全部通过（退出码 0）', v1 === 0, `实际 ${v1}`);
     const s1 = await (await fetch(BASE + `/api/report/status?accessKey=${proj1.accessKey}`)).json();
-    check('自动验收后 7/8（88%，待用户最终提交）', s1.completedStages === 7 && s1.progress === 88, JSON.stringify(s1));
+    check('自动验收后 7/8（90%，待用户最终提交）', s1.completedStages === 7 && s1.progress === 90, JSON.stringify(s1));
     const v1again = await runCli(['--config', 'config-pass.json', '--verify'], TMP);
     check('重复 --verify 幂等（提示已完成）', v1again === 0);
 

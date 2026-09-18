@@ -19,7 +19,8 @@ function buildSnapshot(eventId) {
               COALESCE(SUM(CASE WHEN p.completed_stages >= ${DEPLOY_STAGE_INDEX} THEN 1 ELSE 0 END), 0) AS deployed,
               COALESCE(SUM(CASE WHEN p.completed_stages >= ${DONE_STAGE_INDEX} THEN 1 ELSE 0 END), 0) AS done,
               COALESCE(SUM(CASE WHEN p.archived = 0 AND p.revoked = 0 THEN p.hits ELSE 0 END), 0) AS total_hits,
-              COALESCE(AVG(CASE WHEN p.archived = 0 THEN p.completed_stages END), 0) AS avg_stages
+              COALESCE(AVG(CASE WHEN p.archived = 0 THEN p.completed_stages END), 0) AS avg_stages,
+              COALESCE(SUM(CASE WHEN p.archived = 0 THEN p.completed_stages ELSE 0 END), 0) AS sum_stages
          FROM departments d
          LEFT JOIN groups g ON g.department_id = d.id
          LEFT JOIN projects p ON p.group_id = g.id AND p.archived = 0
@@ -39,7 +40,7 @@ function buildSnapshot(eventId) {
     .prepare(
       `SELECT id, group_id, name, description, port, completed_stages, loop_count,
               status, revoked, last_report_at, created_at,
-              members, summary, value, features, scenario, deliverable, artifact_name, hits, ai_score
+              members, summary, value, features, scenario, deliverable, artifact_name, hits, ai_score, last_seen_at
          FROM projects
         WHERE event_id = ? AND archived = 0
         ORDER BY id`
@@ -53,6 +54,9 @@ function buildSnapshot(eventId) {
     p.department = null;
     p.grp = null;
     p.artifactUrl = p.deliverable === 'package' && p.artifact_name && config.publicHost ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null;
+    // 停滞/活跃信号：当前节点从上次成功上报开始计时；last_seen_at 由 CLI 调用（--next/--status/上报）续期
+    p.stageStartedAt = p.last_report_at || p.created_at;
+    p.lastSeenAt = p.last_seen_at || null;
     if (!projectsByGroup.has(p.group_id)) projectsByGroup.set(p.group_id, []);
     projectsByGroup.get(p.group_id).push(p);
   }
@@ -65,7 +69,7 @@ function buildSnapshot(eventId) {
         const avg =
           gProjects.length === 0
             ? 0
-            : gProjects.reduce((s, p) => s + p.completed_stages, 0) / (gProjects.length * STAGES.length);
+            : gProjects.reduce((s, p) => s + progressPercent(p.completed_stages), 0) / (gProjects.length * 100);
         for (const p of gProjects) {
           p.department = d.name;
           p.grp = g.name;
@@ -82,8 +86,8 @@ function buildSnapshot(eventId) {
     const avg =
       totalProjects === 0
         ? 0
-        : deptGroups.reduce((s, g) => s + g.projects.reduce((x, p) => x + p.completed_stages, 0), 0) /
-          (totalProjects * STAGES.length);
+        : deptGroups.reduce((s, g) => s + g.projects.reduce((x, p) => x + progressPercent(p.completed_stages), 0), 0) /
+          (totalProjects * 100);
     return {
       id: d.id,
       name: d.name,
@@ -176,7 +180,7 @@ function buildSnapshot(eventId) {
       done: kpiRow.done || 0,
       submitted: submittedProjects.length,
       totalHits: kpiRow.total_hits || 0,
-      completion: Math.round((kpiRow.avg_stages / STAGES.length) * 100),
+      completion: Math.round(progressPercent(kpiRow.avg_stages)),
     },
     departments: deptTree,
     events,

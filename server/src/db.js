@@ -163,6 +163,7 @@ function applyColumnMigrations() {
     'ALTER TABLE projects ADD COLUMN ai_score INTEGER',
     'ALTER TABLE projects ADD COLUMN ai_score_detail TEXT',
     'ALTER TABLE projects ADD COLUMN ai_scored_at TEXT',
+    'ALTER TABLE projects ADD COLUMN last_seen_at TEXT',
   ];
   for (const sql of adds) {
     try {
@@ -278,7 +279,7 @@ db.exec(INDEXES);
 
 // 启动自检：必需列缺失说明迁移链路有问题——失败退出，避免带病启动后大屏/后台全 500
 function assertRequiredColumns() {
-  const required = ['loop_count', 'client_id', 'hits', 'deliverable', 'artifact_name', 'members', 'summary', 'value', 'features', 'scenario', 'ai_score'];
+  const required = ['loop_count', 'client_id', 'hits', 'deliverable', 'artifact_name', 'members', 'summary', 'value', 'features', 'scenario', 'ai_score', 'last_seen_at'];
   const cols = new Set(columnsOf('projects'));
   const missing = required.filter((c) => !cols.has(c));
   if (missing.length) {
@@ -287,6 +288,7 @@ function assertRequiredColumns() {
     process.exit(1);
   }
 }
+applyColumnMigrations(); // 正常路径的列迁移（旧库重建路径已在内部调用过）
 assertRequiredColumns();
 db.pragma('foreign_keys = ON');
 db.pragma('journal_mode = WAL');

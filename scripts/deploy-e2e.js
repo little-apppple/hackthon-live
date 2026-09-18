@@ -229,7 +229,7 @@ async function tryFetch(url) {
     const vPkg = await runCli(['--verify', '--file', pkgName], pkgDir);
     check('安装包 --verify 通过（退出码 0）', vPkg === 0);
     const sPkg2 = await (await fetch(BASE + `/api/report/status?accessKey=${projPkg.accessKey}`)).json();
-    check('安装包验收自动上报（7/8）', sPkg2.completedStages === 7 && sPkg2.progress === 88, JSON.stringify(sPkg2));
+    check('安装包验收自动上报（7/8）', sPkg2.completedStages === 7 && sPkg2.progress === 90, JSON.stringify(sPkg2));
     // ---- P1 回归：文件名消毒一致性 / 形态复位 / 带人气项目可删除 ----
     console.log('\n-- 交付形态与消毒回归 --');
     const weirdDir = path.join(TMP, 'fixture-weird');

@@ -132,6 +132,7 @@ router.post('/report', aw(async (req, res) => {
     audit(project.id, st.id, 0, 'INVALID_KEY', msg, ip);
     return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: '项目状态已变化（可能被吊销/归档/迭代），请重新查询' });
   }
+  touchSeen(project.id);
   audit(project.id, st.id, 1, null, msg, ip, evidenceJson);
 
   const progress = progressPercent(st.index);
@@ -232,6 +233,7 @@ router.post('/register', aw(async (req, res) => {
   const description = String(req.body?.description ?? '').trim().slice(0, 200);
   const clientId = String(req.body?.clientId ?? '').trim();
   // 展示信息（注册时采集，用于大屏/后台展示）：参与人员、需求简述、价值、功能、场景
+  const deliverable = req.body?.deliverable === 'package' ? 'package' : 'web';
   const info = {
     members: String(req.body?.members ?? '').trim().slice(0, 200),
     summary: String(req.body?.summary ?? '').trim().slice(0, 300),
@@ -336,8 +338,8 @@ router.post('/register', aw(async (req, res) => {
           if (!group) db.prepare('INSERT INTO groups (event_id, department_id, name) VALUES (?, ?, ?)').run(event.id, dept.id, groupName);
           group = db.prepare('SELECT id FROM groups WHERE department_id = ? AND name = ?').get(dept.id, groupName);
           const inserted = db
-            .prepare('INSERT INTO projects (event_id, group_id, name, description, access_key, port, client_id, members, summary, value, features, scenario) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            .run(event.id, group.id, projectName, description, genAccessKey(), port, clientId || null, info.members, info.summary, info.value, info.features, info.scenario);
+            .prepare('INSERT INTO projects (event_id, group_id, name, description, access_key, port, client_id, members, summary, value, features, scenario, deliverable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(event.id, group.id, projectName, description, genAccessKey(), port, clientId || null, info.members, info.summary, info.value, info.features, info.scenario, deliverable);
           return { project: db.prepare('SELECT * FROM projects WHERE id = ?').get(inserted.lastInsertRowid), created: true };
         });
         const run = tx(); // transaction() 返回包装函数，必须调用才执行
@@ -638,6 +640,15 @@ router.get('/hits', (req, res) => {
   res.json({ ok: true, eventId: event.id, projects: rows });
 });
 
+// CLI 活动心跳：--next / --status / 上报都会经过这里，用于大屏显示「最近活动」（不需要队伍手工维护）
+function touchSeen(projectId) {
+  try {
+    db.prepare("UPDATE projects SET last_seen_at = datetime('now','localtime') WHERE id = ?").run(projectId);
+  } catch {
+    /* 心跳失败不影响主流程 */
+  }
+}
+
 // Agent 查询当前进度与下一节点（409 自愈 / --verify 定位部署地址用）
 // AI 参考评分：最终提交后由 CLI 自动计算并上报（机器可判定维度 + 证据；主观项单列不计入自动分）
 // 只接受已提交（8/8）的项目；允许重算覆盖（以最后一次为准），历史留审计
@@ -703,6 +714,7 @@ router.get('/report/status', (req, res) => {
   if (!project || project.archived) {
     return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: 'accessKey 无效' });
   }
+  touchSeen(project.id);
   const next = project.completed_stages < STAGES.length ? stageByIndex(project.completed_stages + 1) : null;
   // 过程审计统计：供 AI 评分采集证据（违规/刷上报等）
   const stat = db

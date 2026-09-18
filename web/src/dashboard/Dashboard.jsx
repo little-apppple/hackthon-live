@@ -56,7 +56,7 @@ export default function Dashboard() {
         <div className="dash-body">
           <main className="dash-main">
             <KpiBar kpi={snapshot.kpi} />
-            <DeptGrid departments={snapshot.departments} stages={snapshot.stages} onOpenDetail={setDetail} />
+            <DeptGrid departments={snapshot.departments} stages={snapshot.stages} serverTime={snapshot.serverTime} onOpenDetail={setDetail} />
           </main>
           <aside className="dash-side">
             <Spotlight loadingProjects={snapshot.loadingProjects} />

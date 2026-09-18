@@ -107,7 +107,7 @@ async function api(method, path, body, useAuth = true) {
     check('跳节点被拒 409', skip.status === 409 && skip.data.code === 'STAGE_OUT_OF_ORDER');
     check('提示应上报节点', skip.data.expectedStage?.id === 'requirements');
     const ok1 = await api('POST', '/api/report', { accessKey: key1, stage: 1, message: '需求完成' }, false);
-    check('需求分析上报成功', ok1.data.ok && ok1.data.progress === 13);
+    check('需求分析上报成功', ok1.data.ok && ok1.data.progress === 5);
     const dup = await api('POST', '/api/report', { accessKey: key1, stage: 'requirements' }, false);
     check('重复上报被拒 409', dup.status === 409 && dup.data.code === 'STAGE_ALREADY_DONE');
     const throttled = await api('POST', '/api/report', { accessKey: key1, stage: 'design' }, false);
@@ -125,7 +125,7 @@ async function api(method, path, body, useAuth = true) {
     check('吊销后上报被拒 403', rev.status === 403 && rev.data.code === 'KEY_REVOKED');
     await api('POST', `/api/admin/projects/${created[0].id}/restore`);
     const ok2 = await api('POST', '/api/report', { accessKey: key1, stage: 'design' }, false);
-    check('恢复后可继续上报', ok2.data.ok && ok2.data.progress === 25);
+    check('恢复后可继续上报', ok2.data.ok && ok2.data.progress === 10);
     // 归档项目2，端口应释放并被复用
     const before = created[1].port;
     await api('POST', `/api/admin/projects/${created[1].id}/archive`);
@@ -152,7 +152,7 @@ async function api(method, path, body, useAuth = true) {
     check('状态变为 deployed', mine.status === 'deployed');
     await new Promise((r) => setTimeout(r, 10000)); // 避开限频窗口
     const done = await api('POST', '/api/report', { accessKey: key1, stage: 'acceptance' }, false);
-    check('线上验收完成 88%（8 节点模型 7/8）', done.data.ok && done.data.progress === 88, `实际 ${done.data?.progress}`);
+    check('线上验收完成 90%（加权进度 7/8）', done.data.ok && done.data.progress === 90, `实际 ${done.data?.progress}`);
     check('下一节点指向最终提交', done.data.nextStage?.id === 'submission');
     check('deployLinkReady 标记', done.data.deployLinkReady === true);
     const snapDone = await api('GET', '/api/snapshot', undefined, false);
@@ -402,7 +402,7 @@ async function api(method, path, body, useAuth = true) {
     check('重置后直接提交被拒 409', subEarly.status === 409 && subEarly.data.code === 'STAGE_OUT_OF_ORDER');
     await new Promise((r) => setTimeout(r, 10000));
     const reReq = await api('POST', '/api/report', { accessKey: key1, stage: 'requirements' }, false);
-    check('第二轮重新上报需求成功', reReq.data.ok && reReq.data.progress === 13);
+    check('第二轮重新上报需求成功', reReq.data.ok && reReq.data.progress === 5);
 
     // 走完 2-7 节点（限频间隔 10s）
     for (const stage of ['design', 'prototype', 'coding', 'testing', 'deployment', 'acceptance']) {

@@ -566,3 +566,16 @@ a { color: var(--txt-bright); text-decoration: none; transition: all 0.2s ease; 
 .hot-count { font-family: var(--font-mono); font-size: 14px; color: var(--white); flex-shrink: 0; min-width: 28px; text-align: right; }
 .pc-hits { font-family: var(--font-mono); font-size: 11px; color: var(--amber, #ffb200); flex-shrink: 0; }
 .submitted-hits { font-family: var(--font-mono); font-size: 11px; color: var(--txt); }
+
+/* ---- 现场呈现优化：自报/已验证区分、停滞、可体验 ---- */
+.pc-dot.done { background: var(--red); box-shadow: 0 0 8px rgba(194, 59, 34, 0.8); }
+/* 自报节点（需求~自测）：空心环，表示「小组自报」 */
+.pc-dot.done:not(.verified) { background: transparent; border: 2px solid var(--red); box-shadow: none; }
+/* 服务端验证节点（部署/验收/提交）：实心 + 微光 */
+.pc-dot.done.verified { box-shadow: 0 0 12px rgba(194, 59, 34, 0.9); }
+.pc-dot.skipped { background: transparent; border: 1px dashed rgba(122, 122, 122, 0.5); }
+.pc-playable {
+  flex-shrink: 0; font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px;
+  color: var(--white); border: 1px solid rgba(44, 255, 86, 0.5); background: rgba(44, 255, 86, 0.1);
+  border-radius: 4px; padding: 1px 7px; animation: pulse 2.4s ease infinite;
+}

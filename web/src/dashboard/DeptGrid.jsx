@@ -1,7 +1,7 @@
 import React from 'react';
 import ProjectCard from './ProjectCard.jsx';
 
-export default function DeptGrid({ departments, stages, onOpenDetail }) {
+export default function DeptGrid({ departments, stages, serverTime, onOpenDetail }) {
   if (!departments.length) {
     return (
       <section className="dept-grid empty-hint">
@@ -34,7 +34,7 @@ export default function DeptGrid({ departments, stages, onOpenDetail }) {
                 <div className="group-projects">
                   {g.projects.length === 0 && <div className="group-empty">暂无项目</div>}
                   {g.projects.map((p) => (
-                    <ProjectCard key={p.id} project={p} stages={stages} onOpenDetail={onOpenDetail} />
+                    <ProjectCard key={p.id} project={p} stages={stages} serverTime={serverTime} onOpenDetail={onOpenDetail} />
                   ))}
                 </div>
               </div>

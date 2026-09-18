@@ -78,8 +78,14 @@ export default function KpiBar({ kpi }) {
       <Stat label="参赛部门" value={kpi.departments} tone="cyan" />
       <Stat label="参赛小组" value={kpi.groups} tone="blue" />
       <Stat label="参赛项目" value={kpi.projects} tone="violet" />
-      <Stat label="已部署上线" value={kpi.deployed} tone="green" sub={kpi.projects ? `占比 ${Math.round((kpi.deployed / kpi.projects) * 100)}%` : ''} />
-      <Stat label="验收完成" value={kpi.done} tone="gold" sub={kpi.projects ? `占比 ${Math.round((kpi.done / kpi.projects) * 100)}%` : ''} />
+      {/* 主指标：能玩了（已上线）/ 定稿（已提交）；验收完成作为副文案，避免三档口径混淆 */}
+      <Stat label="已上线" value={kpi.deployed} tone="green" sub={kpi.projects ? `能玩了 · 占比 ${Math.round((kpi.deployed / kpi.projects) * 100)}%` : ''} />
+      <Stat
+        label="已提交"
+        value={kpi.submitted ?? 0}
+        tone="gold"
+        sub={kpi.projects ? `定稿 · 占比 ${Math.round(((kpi.submitted ?? 0) / kpi.projects) * 100)}%${kpi.done ? ` · 验收通过 ${kpi.done}` : ''}` : ''}
+      />
       <div className="kpi-ring-card">
         <div ref={ringRef} className="kpi-ring" />
         <div className="kpi-ring-label">整体完成率</div>

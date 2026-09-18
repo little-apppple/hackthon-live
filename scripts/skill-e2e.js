@@ -228,7 +228,7 @@ function writeFixture() {
     const ver = await runSkill(['--verify']);
     check('--verify 全部通过（退出码 0）', ver.code === 0, ver.out.slice(-300));
     const st7 = await statusOf(key1);
-    check('线上验收自动上报（7/8，88%，待终审）', st7.completedStages === 7 && st7.progress === 88 && st7.nextStage?.id === 'submission', JSON.stringify(st7));
+    check('线上验收自动上报（7/8，90%，待终审）', st7.completedStages === 7 && st7.progress === 90 && st7.nextStage?.id === 'submission', JSON.stringify(st7));
 
     // 终审硬门禁：--next 必须把「用户本人执行」的指引交给 Agent
     const nextSubmit = await runSkill(['--next']);

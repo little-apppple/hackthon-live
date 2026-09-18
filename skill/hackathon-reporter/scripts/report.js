@@ -142,6 +142,7 @@ function parseArgs(argv) {
     else if (a === '--features') args.features = argv[++i];
     else if (a === '--scenario') args.scenario = argv[++i];
     else if (a === '--file') args.file = argv[++i];
+    else if (a === '--deliverable') args.deliverable = argv[++i];
     else if (a === '--register-token') args.registerToken = argv[++i];
     else if (a === '--loop') args.loop = true;
     else if (a === '--submit') args.submit = true;
@@ -321,8 +322,8 @@ function bakedConfig() {
 }
 
 // 注册模式：向服务端自助注册换取 accessKey（以 clientId 幂等，可安全重跑）
-async function registerOnServer(serverUrl, registerToken, { department, group, project, description, clientId, members, summary, value, features, scenario }) {
-  const payload = JSON.stringify({ department, group, project, description: description || '', registerToken, clientId, members, summary, value, features, scenario });
+async function registerOnServer(serverUrl, registerToken, { department, group, project, description, clientId, members, summary, value, features, scenario, deliverable }) {
+  const payload = JSON.stringify({ department, group, project, description: description || '', registerToken, clientId, members, summary, value, features, scenario, deliverable });
   const { status, body } = await callApiWithRetry(
     { serverUrl },
     '/api/register',
@@ -359,6 +360,13 @@ async function registerOnServer(serverUrl, registerToken, { department, group, p
 async function cmdInit(args) {
   const target = path.resolve(process.cwd(), 'hackathon.config.json');
   // 客户端标识：沿用既有配置里的（--force 重跑不变），没有则首次生成并绑定
+  let existingCfg = null;
+  try {
+    existingCfg = JSON.parse(fs.readFileSync(target, 'utf-8'));
+  } catch {
+    /* 首次接入或配置损坏 */
+  }
+
   let clientId = null;
   try {
     clientId = JSON.parse(fs.readFileSync(target, 'utf-8')).clientId || null;
@@ -446,6 +454,7 @@ async function cmdInit(args) {
       description: args.description,
       clientId,
       ...infoArgs,
+      deliverable: args.deliverable || (existingCfg || {}).deliverable || 'web',
     });
     accessKey = r.accessKey;
     deployUrl = r.deployUrl;
@@ -492,6 +501,7 @@ async function cmdInit(args) {
   }
 
   const cfg = {
+    deliverable: args.deliverable || (existingCfg || {}).deliverable || 'web',
     serverUrl,
     accessKey,
     clientId,
