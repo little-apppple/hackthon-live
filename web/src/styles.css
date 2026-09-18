@@ -34,10 +34,10 @@ button { cursor: pointer; font-family: inherit; letter-spacing: inherit; transit
 a { color: var(--txt-bright); text-decoration: none; transition: all 0.2s ease; }
 ::selection { background: rgba(194, 59, 34, 0.45); color: var(--white); }
 
-/* ============ 1920x1080 缩放容器 ============ */
-.viewport { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+/* ============ 1920x1080 缩放容器（等比缩放 + 非 16:9 视口居中，黑边补底） ============ */
+.viewport { width: 100%; height: 100%; overflow: hidden; background: var(--bg); display: flex; align-items: center; justify-content: center; }
 .screen {
-  width: 1920px; height: 1080px; transform-origin: top left;
+  width: 1920px; height: 1080px; transform-origin: center center; flex: 0 0 auto;
   position: relative;
   background:
     radial-gradient(1500px 950px at 50% 46%, rgba(0, 0, 0, 0) 52%, rgba(0, 0, 0, 0.65) 100%),
