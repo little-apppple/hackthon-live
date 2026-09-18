@@ -233,6 +233,9 @@ export default function ProjectsPanel({ eventId }) {
                   {(p.loop_count || 1) > 1 && <span className="mini-num">LOOP×{p.loop_count}</span>}
                 </td>
                 <td>
+                  <button className="op" onClick={() => setDetailProject(p)}>查看</button>
+                </td>
+                <td>
                   {p.client_id ? (
                     <button
                       className="key-btn mono"
@@ -244,9 +247,6 @@ export default function ProjectsPanel({ eventId }) {
                   ) : (
                     <span className="dim-cell">未绑定</span>
                   )}
-                </td>
-                <td>
-                  <button className="op" onClick={() => setDetailProject(p)}>查看</button>
                 </td>
                 <td className="mono">{p.port}</td>
                 <td>
@@ -320,7 +320,7 @@ export default function ProjectsPanel({ eventId }) {
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={9} className="list-empty">
+                <td colSpan={11} className="list-empty">
                   暂无项目，请在上方创建
                 </td>
               </tr>

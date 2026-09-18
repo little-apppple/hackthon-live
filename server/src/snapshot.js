@@ -18,7 +18,7 @@ function buildSnapshot(eventId) {
               COUNT(p.id) AS projects,
               COALESCE(SUM(CASE WHEN p.completed_stages >= ${DEPLOY_STAGE_INDEX} THEN 1 ELSE 0 END), 0) AS deployed,
               COALESCE(SUM(CASE WHEN p.completed_stages >= ${DONE_STAGE_INDEX} THEN 1 ELSE 0 END), 0) AS done,
-              COALESCE(SUM(CASE WHEN p.archived = 0 THEN p.hits ELSE 0 END), 0) AS total_hits,
+              COALESCE(SUM(CASE WHEN p.archived = 0 AND p.revoked = 0 THEN p.hits ELSE 0 END), 0) AS total_hits,
               COALESCE(AVG(CASE WHEN p.archived = 0 THEN p.completed_stages END), 0) AS avg_stages
          FROM departments d
          LEFT JOIN groups g ON g.department_id = d.id
@@ -39,7 +39,7 @@ function buildSnapshot(eventId) {
     .prepare(
       `SELECT id, group_id, name, description, port, completed_stages, loop_count,
               status, revoked, last_report_at, created_at,
-              members, summary, value, features, scenario, deliverable, artifact_name, hits
+              members, summary, value, features, scenario, deliverable, artifact_name, hits, ai_score
          FROM projects
         WHERE event_id = ? AND archived = 0
         ORDER BY id`
@@ -50,6 +50,8 @@ function buildSnapshot(eventId) {
   for (const p of projects) {
     p.progress = progressPercent(p.completed_stages);
     p.link = config.publicHost ? `http://${config.publicHost}:${p.port}` : null;
+    p.department = null;
+    p.grp = null;
     p.artifactUrl = p.deliverable === 'package' && p.artifact_name && config.publicHost ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null;
     if (!projectsByGroup.has(p.group_id)) projectsByGroup.set(p.group_id, []);
     projectsByGroup.get(p.group_id).push(p);
@@ -64,6 +66,10 @@ function buildSnapshot(eventId) {
           gProjects.length === 0
             ? 0
             : gProjects.reduce((s, p) => s + p.completed_stages, 0) / (gProjects.length * STAGES.length);
+        for (const p of gProjects) {
+          p.department = d.name;
+          p.grp = g.name;
+        }
         return {
           id: g.id,
           name: g.name,
@@ -124,7 +130,7 @@ function buildSnapshot(eventId) {
   // 人气榜：按点击量取前 5（去重后的人气值）
   const hotProjects = db
     .prepare(
-      `SELECT p.id AS projectId, p.name, p.hits, p.deliverable, p.artifact_name, p.port, p.status,
+      `SELECT p.id AS projectId, p.name, p.hits, p.deliverable, p.artifact_name, p.port, p.status, p.completed_stages,
               g.name AS grp, d.name AS department
          FROM projects p
          JOIN groups g ON g.id = p.group_id
@@ -133,14 +139,14 @@ function buildSnapshot(eventId) {
         ORDER BY p.hits DESC, p.id DESC LIMIT 5`
     )
     .all(eid)
-    .map((p) => ({ ...p, link: config.publicHost ? `http://${config.publicHost}:${p.port}` : null,
+    .map((p) => ({ ...p, progress: progressPercent(p.completed_stages || 0), link: config.publicHost ? `http://${config.publicHost}:${p.port}` : null,
       artifactUrl: p.deliverable === 'package' && p.artifact_name && config.publicHost ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null }));
 
   // 已提交（最终参赛作品）列表：按提交时间倒序，供大屏「已完成项目列表」与烟花通知使用
   const submittedProjects = db
     .prepare(
       `SELECT p.id AS projectId, p.name, p.loop_count, p.port, p.last_report_at, p.ai_score, p.ai_scored_at,
-              p.members, p.summary, p.value, p.features, p.scenario, p.deliverable, p.artifact_name, p.hits,
+              p.completed_stages, p.members, p.summary, p.value, p.features, p.scenario, p.deliverable, p.artifact_name, p.hits,
               g.name AS grp, d.name AS department
          FROM projects p
          JOIN groups g ON g.id = p.group_id
@@ -151,6 +157,7 @@ function buildSnapshot(eventId) {
     .all(eid)
     .map((p) => ({
       ...p,
+      progress: progressPercent(p.completed_stages || 0),
       link: config.publicHost ? `http://${config.publicHost}:${p.port}` : null,
       artifactUrl: p.deliverable === 'package' && p.artifact_name && config.publicHost ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null,
     }));

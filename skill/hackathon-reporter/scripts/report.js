@@ -1227,7 +1227,10 @@ async function verifyPackage(cfg, url, localFile) {
   if (!deployedUrl) {
     try {
       const st = await callApiWithRetry(cfg, '/api/report/status', { headers: authHeader(cfg) });
-      if (st.body?.port) deployedUrl = `http://${new URL(cfg.serverUrl).hostname}:${st.body.port}`;
+      if (st.body?.port) {
+        const u = new URL(cfg.serverUrl);
+        deployedUrl = `${u.protocol}//${u.hostname}:${st.body.port}`;
+      }
     } catch {
       /* 交给下游报错 */
     }
@@ -1244,7 +1247,15 @@ async function verifyPackage(cfg, url, localFile) {
   }
   console.log(`✓ 探活通过（${live.detail}）`);
 
-  const name = localFile ? path.basename(localFile) : (cfg.deploy?.file ? path.basename(cfg.deploy.file) : '');
+  // 文件名以服务端记录为准（上传时会做安全消毒，本地名可能与其不同）
+  let name = '';
+  try {
+    const st = await callApiWithRetry(cfg, '/api/report/status', { headers: authHeader(cfg) });
+    if (st.body?.artifactName) name = st.body.artifactName;
+  } catch {
+    /* 回退到本地名 */
+  }
+  if (!name) name = localFile ? path.basename(localFile) : cfg.deploy?.file ? path.basename(cfg.deploy.file) : '';
   if (!name) {
     console.error('✗ 无法确定安装包文件名：请用 --file 指定本地安装包（与上传时同名）');
     process.exit(3);
@@ -1414,7 +1425,8 @@ async function probeLiveness(url, retries) {
 
 async function cmdVerify(args, cfg) {
   // 安装包交付（非 Web 应用）：探活 + 下载链接可用性校验
-  if ((cfg.deploy?.type || args.type) === 'package') {
+  const declarePkg = (cfg.deploy?.type || args.type) === 'package';
+  if (declarePkg) {
     const localFile = args.file ? path.resolve(process.cwd(), args.file) : cfg.deploy?.file ? path.resolve(process.cwd(), cfg.deploy.file) : '';
     console.log('== 黑客松线上验收（安装包交付）==');
     const result = await verifyPackage(cfg, args.url, localFile);

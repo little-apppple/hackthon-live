@@ -142,6 +142,7 @@ router.delete('/events/:id', (req, res) => {
   // 已归档项目与审计随之清除（归档即代表赛事数据不再保留）
   db.transaction(() => {
     db.prepare('DELETE FROM reports WHERE project_id IN (SELECT id FROM projects WHERE event_id = ?)').run(id);
+    db.prepare('DELETE FROM hit_events WHERE project_id IN (SELECT id FROM projects WHERE event_id = ?)').run(id);
     db.prepare('DELETE FROM projects WHERE event_id = ?').run(id);
     db.prepare('DELETE FROM events WHERE id = ?').run(id);
   })();
@@ -427,6 +428,7 @@ router.delete('/projects/:id', (req, res) => {
   if (!p.archived) return res.status(409).json({ ok: false, error: '项目未归档，请先归档再彻底删除' });
   db.transaction(() => {
     db.prepare('DELETE FROM reports WHERE project_id = ?').run(p.id);
+    db.prepare('DELETE FROM hit_events WHERE project_id = ?').run(p.id); // 人气明细带外键，需一并清理
     db.prepare('DELETE FROM projects WHERE id = ?').run(p.id);
   })();
   notifyRefresh('destroy');

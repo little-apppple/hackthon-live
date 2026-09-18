@@ -169,20 +169,26 @@ const CLIENT_ID_RE = /^cli_[0-9a-f]{32}$/;
 const registerAttempts = new Map(); // ip -> epoch ms 数组
 const loopLastAt = new Map(); // projectId -> epoch ms（loop 每项目 10s 窗口）
 
-// 人气上报限频（每 IP 每分钟 60 次）与明细清理（只保留去重窗口所需的时间范围）
-const hitAttempts = new Map(); // ip -> epoch ms 数组
-function hitRateLimited(ip) {
+let lastHitNotifyAt = 0; // 人气广播节流（最多每 2 秒一次）
+
+// 人气上报限频：每终端与每 IP 双预算（NAT/同一出口 IP 下不会互相挤占），均可配置
+const hitAttempts = new Map(); // key -> epoch ms 数组（key = `t:<terminal>` 或 `ip:<ip>`）
+function overBudget(key, limit) {
+  if (!limit || limit <= 0) return false;
   const now = Date.now();
-  const arr = (hitAttempts.get(ip) || []).filter((t) => now - t < 60 * 1000);
-  if (arr.length >= 60) return true;
+  const arr = (hitAttempts.get(key) || []).filter((t) => now - t < 60 * 1000);
+  if (arr.length >= limit) {
+    hitAttempts.set(key, arr);
+    return true;
+  }
   arr.push(now);
-  hitAttempts.set(ip, arr);
+  hitAttempts.set(key, arr);
   return false;
 }
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, arr] of hitAttempts) {
-    if (!arr.some((t) => now - t < 60 * 1000)) hitAttempts.delete(ip);
+  for (const [key, arr] of hitAttempts) {
+    if (!arr.some((t) => now - t < 60 * 1000)) hitAttempts.delete(key);
   }
   try {
     db.prepare('DELETE FROM hit_events WHERE ts < ?').run(now - Math.max(config.hitWindowMs * 10, 3600000));
@@ -497,7 +503,13 @@ router.post('/bind-client', (req, res) => {
 // 去重规则：同一终端对同一项目，在 hitWindowMs（默认 60 秒）内的多次点击只计一次
 router.post('/hit', (req, res) => {
   const ip = req.ip || '';
-  if (hitRateLimited(ip)) {
+  const rawTerminal = String(req.body?.terminal ?? '').trim().slice(0, 64);
+  // 前端生成的终端标识形如 t_xxx；不合法则视为缺失（下方回退 IP+UA），避免用任意串批量刷人气
+  const terminalOk = /^t_[a-z0-9_]{6,40}$/.test(rawTerminal); // 允许下划线（部分客户端生成器会带）
+  const terminal = terminalOk
+    ? rawTerminal
+    : `ip:${crypto.createHash('sha256').update(`${ip}|${req.headers['user-agent'] || ''}`).digest('hex').slice(0, 32)}`;
+  if (overBudget(`t:${terminal}`, config.hitRatePerTerminal) || overBudget(`ip:${ip}`, config.hitRatePerIp)) {
     return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: '点击上报过于频繁' });
   }
   const projectId = Number(req.body?.projectId);
@@ -505,13 +517,15 @@ router.post('/hit', (req, res) => {
     return res.status(400).json({ ok: false, code: 'INVALID_PROJECT', error: '缺少有效的 projectId' });
   }
   const kind = req.body?.kind === 'package' ? 'package' : 'web';
-  const project = db.prepare('SELECT id, revoked, archived FROM projects WHERE id = ?').get(projectId);
-  if (!project || project.archived) {
+  const project = db.prepare('SELECT id, revoked, archived, event_id FROM projects WHERE id = ?').get(projectId);
+  const active = getActiveEvent();
+  if (!project || project.archived || project.event_id !== active.id) {
     return res.status(404).json({ ok: false, code: 'INVALID_PROJECT', error: '项目不存在' });
   }
-  // 终端标识：前端 localStorage 生成的随机串；缺失时回退 IP + UA（弱标识）
-  const rawTerminal = String(req.body?.terminal ?? '').trim().slice(0, 64);
-  const terminal = rawTerminal || `ip:${crypto.createHash('sha256').update(`${ip}|${req.headers['user-agent'] || ''}`).digest('hex').slice(0, 32)}`;
+  if (project.revoked) {
+    // 被吊销的项目不再累计人气（与人气榜口径一致）
+    return res.status(403).json({ ok: false, code: 'KEY_REVOKED', error: '该项目已被吊销，不计人气' });
+  }
 
   const now = Date.now();
   const last = db
@@ -527,7 +541,10 @@ router.post('/hit', (req, res) => {
     db.prepare("UPDATE projects SET hits = hits + 1, updated_at = datetime('now','localtime') WHERE id = ?").run(projectId);
   })();
   const hits = db.prepare('SELECT hits FROM projects WHERE id = ?').get(projectId)?.hits ?? 0;
-  notifyRefresh('hit');
+  if (Date.now() - lastHitNotifyAt > 2000) {
+    lastHitNotifyAt = Date.now();
+    notifyRefresh('hit');
+  }
   res.json({ ok: true, counted: true, hits, windowMs: config.hitWindowMs });
 });
 
@@ -634,6 +651,8 @@ router.get('/report/status', (req, res) => {
     port: project.port,
     loopCount: project.loop_count || 1,
     clientId: project.client_id || null,
+    deliverable: project.deliverable || 'web',
+    artifactName: project.artifact_name || null,
     completedStages: project.completed_stages,
     progress: progressPercent(project.completed_stages),
     nextStage: next,

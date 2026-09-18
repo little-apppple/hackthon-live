@@ -143,14 +143,19 @@ const PKG_MIME = {
   '.appimage': 'application/octet-stream',
 };
 
+// 转义用户可控文本（项目名等）后再插入落地页 HTML，避免存储型 XSS
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
 async function deployPackage(project, opts, archiveBuffer) {
   const root = appRoot(project.id);
   const appDir = path.join(root, 'app');
   const rawName = String(opts.file || '').trim();
   const base = path.basename(rawName).replace(/[^\w.\-\u4e00-\u9fa5]+/g, '_').slice(0, 120);
-  if (!base) return { ok: false, error: '安装包文件名无效，请用 --file <安装包路径> 指定' };
+  if (!base) return { ok: false, code: 'INVALID_FILE', error: '安装包文件名无效，请用 --file <安装包路径> 指定' };
   if (!PKG_EXT.test(base)) {
-    return { ok: false, error: `不支持的安装包格式：${base}（支持 exe/msi/zip/7z/tar.gz/apk/dmg/pkg/deb/rpm/jar/appimage）` };
+    return { ok: false, code: 'INVALID_FILE', error: `不支持的安装包格式：${base}（支持 exe/msi/zip/7z/tar.gz/apk/dmg/pkg/deb/rpm/jar/appimage）` };
   }
 
   // 停旧实例并清目录（与部署 web 应用一致，重复部署是覆盖语义）
@@ -171,13 +176,13 @@ async function deployPackage(project, opts, archiveBuffer) {
   const sizeMb = (archiveBuffer.length / 1024 / 1024).toFixed(1);
   fs.writeFileSync(
     path.join(appDir, 'index.html'),
-    `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${project.name} · 安装包下载</title>
+    `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(project.name)} · 安装包下载</title>
 <style>body{margin:0;background:#050505;color:#e8e8e8;font-family:'Courier New',monospace;display:flex;align-items:center;justify-content:center;height:100vh}
 main{border:1px solid rgba(194,59,34,.5);border-radius:8px;padding:32px 40px;text-align:center}
 h1{font-size:22px;margin:0 0 6px}p{color:#7a7a7a;font-size:14px;margin:6px 0 18px}
 a{display:inline-block;background:#c23b22;color:#fff;text-decoration:none;padding:12px 26px;border-radius:4px;font-weight:700}
 a:hover{background:#e85a3a}code{color:#c8c8c8}</style></head>
-<body><main><h1>${project.name}</h1><p>安装包 · ${sizeMb} MB</p><a href="./${encodeURIComponent(base)}" download>下载安装包</a>
+<body><main><h1>${escapeHtml(project.name)}</h1><p>安装包 · ${sizeMb} MB</p><a href="./${encodeURIComponent(base)}" download>下载安装包</a>
 <p><code>${base}</code></p></main></body></html>`
   );
 
@@ -195,10 +200,11 @@ a:hover{background:#e85a3a}code{color:#c8c8c8}</style></head>
 
   const state = ensureState(project);
   state.lastDeployAt = meta.deployedAt;
+  state.restarts = 0;
   killPortListener(project.port);
   const result = await startAndProbe(project, meta, state);
   if (!result.ok) result.logTail = logTail(project.id);
-  return result;
+  return { ...result, artifactName: base };
 }
 
 function startPackageServer(project, meta, state) {
@@ -219,7 +225,8 @@ function startPackageServer(project, meta, state) {
       const ext = path.extname(target).toLowerCase();
       const headers = { 'Content-Type': PKG_MIME[ext] || MIME[ext] || 'application/octet-stream' };
       if (PKG_EXT.test(target)) {
-        headers['Content-Disposition'] = `attachment; filename="${encodeURIComponent(path.basename(target))}"`;
+        const dlName = path.basename(target);
+        headers['Content-Disposition'] = `attachment; filename="${dlName.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(dlName)}`;
         headers['Content-Length'] = String(fs.statSync(target).size);
       }
       res.writeHead(200, headers);
@@ -516,6 +523,9 @@ async function deployProject(project, opts, archiveBuffer) {
       return { ok: false, error: '依赖安装失败（npm install）', logTail: logTail(project.id) };
     }
   }
+
+  // 交付形态复位：改为 Web 应用交付后，清掉安装包标记（否则大屏会给出失效的下载入口）
+  db.prepare("UPDATE projects SET deliverable = 'web', artifact_name = NULL WHERE id = ?").run(project.id);
 
   // 4. 启动 + 探活
   const result = await startAndProbe(project, meta, state);

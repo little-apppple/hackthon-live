@@ -69,7 +69,8 @@ router.post(
       ? await deployer.deployPackage(project, { file: pkgFile }, req.body)
       : await deployer.deployProject(project, { type, start, install, dir }, req.body);
     if (!result.ok) {
-      return res.status(500).json({ ok: false, code: 'DEPLOY_FAILED', error: result.error, logTail: result.logTail });
+      const code = result.code || 'DEPLOY_FAILED';
+      return res.status(code === 'INVALID_FILE' ? 400 : 500).json({ ok: false, code, error: result.error, logTail: result.logTail });
     }
     notifyRefresh('deploy');
 
@@ -100,7 +101,7 @@ router.post(
       code: 'DEPLOYED',
       deployUrl: `http://${config.publicHost}:${project.port}`,
       deliverable: type,
-      artifactUrl: type === 'package' ? `http://${config.publicHost}:${project.port}/${encodeURIComponent(pkgFile)}` : undefined,
+      artifactUrl: type === 'package' ? `http://${config.publicHost}:${project.port}/${encodeURIComponent(result.artifactName || pkgFile)}` : undefined,
       status: deployer.getStatus(project.id),
       probe: result.probe,
       stageReported,

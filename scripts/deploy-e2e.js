@@ -71,7 +71,7 @@ async function tryFetch(url) {
   check('测试服务启动', up);
   if (!up) process.exit(1);
 
-  let proj1 = null, projPkg;
+  let proj1 = null, projPkg, projWeird;
   let proj2 = null;
   let proj3 = null;
   let cookie = '';
@@ -230,10 +230,61 @@ async function tryFetch(url) {
     check('安装包 --verify 通过（退出码 0）', vPkg === 0);
     const sPkg2 = await (await fetch(BASE + `/api/report/status?accessKey=${projPkg.accessKey}`)).json();
     check('安装包验收自动上报（7/8）', sPkg2.completedStages === 7 && sPkg2.progress === 88, JSON.stringify(sPkg2));
+    // ---- P1 回归：文件名消毒一致性 / 形态复位 / 带人气项目可删除 ----
+    console.log('\n-- 交付形态与消毒回归 --');
+    const weirdDir = path.join(TMP, 'fixture-weird');
+    fs.mkdirSync(weirdDir, { recursive: true });
+    const weirdLocal = 'My Setup 1.2 (beta).zip'; // 含空格与括号：消毒后应变为 My_Setup_1.2_(beta).zip
+    const weirdBuf = Buffer.alloc(64 * 1024);
+    weirdBuf.write('PK\\x03\\x04', 0, 'binary');
+    fs.writeFileSync(path.join(weirdDir, weirdLocal), weirdBuf);
+    projWeird = await create('文件名消毒用例', 0);
+    fs.writeFileSync(
+      path.join(weirdDir, 'hackathon.config.json'),
+      JSON.stringify({ serverUrl: BASE, accessKey: projWeird.accessKey, deploy: { type: 'package', file: weirdLocal } }, null, 2)
+    );
+    for (const st of ['requirements', 'design', 'prototype', 'coding', 'testing']) {
+      await runCli(['--stage', st, '--message', 'deploy-e2e-weird'], weirdDir);
+    }
+    const dWeird = await runCli(['--deploy', '--type', 'package', '--file', weirdLocal], weirdDir);
+    check('含特殊字符的安装包名可发布', dWeird === 0);
+    const sWeird = await (await fetch(BASE + `/api/report/status?accessKey=${projWeird.accessKey}`)).json();
+    check('status 透出交付形态与消毒后的包名', sWeird.deliverable === 'package' && /^[\w.\-()]+\.zip$/.test(sWeird.artifactName || '') && sWeird.artifactName !== weirdLocal, JSON.stringify({ deliverable: sWeird.deliverable, artifactName: sWeird.artifactName }));
+    const dlWeird = await fetch(`http://localhost:${projWeird.port}/${encodeURIComponent(sWeird.artifactName)}`).catch(() => null);
+    const dlWeirdBuf = dlWeird ? Buffer.from(await dlWeird.arrayBuffer()) : Buffer.alloc(0);
+    check('按消毒后包名的直链可用', dlWeird?.status === 200 && dlWeirdBuf.length === weirdBuf.length, JSON.stringify({ status: dlWeird?.status, size: dlWeirdBuf.length }));
+    const vWeird = await runCli(['--verify', '--file', weirdLocal], weirdDir);
+    check('特殊字符包的 --verify 通过（按服务端包名校验）', vWeird === 0);
+
+    // package → node 重部署：交付形态应复位为 web，不再给出失效下载入口
+    const cfgWeirdPath = path.join(weirdDir, 'hackathon.config.json');
+    const cfgWeird = JSON.parse(fs.readFileSync(cfgWeirdPath, 'utf8'));
+    delete cfgWeird.deploy;
+    fs.writeFileSync(cfgWeirdPath, JSON.stringify(cfgWeird, null, 2));
+    fs.writeFileSync(path.join(weirdDir, 'package.json'), JSON.stringify({ name: 'fx-weird', scripts: { start: 'node server.js' } }, null, 2));
+    fs.writeFileSync(path.join(weirdDir, 'server.js'), "const http=require('http');http.createServer((q,s)=>s.end('web-again')).listen(Number(process.env.PORT)||8080)");
+    const dBack = await runCli(['--deploy'], weirdDir);
+    check('改为 Web 交付后重部署成功', dBack === 0);
+    const sBack = await (await fetch(BASE + `/api/report/status?accessKey=${projWeird.accessKey}`)).json();
+    check('交付形态复位为 web（清掉安装包标记）', sBack.deliverable === 'web' && !sBack.artifactName, JSON.stringify({ deliverable: sBack.deliverable, artifactName: sBack.artifactName }));
+    const snapBack = await (await fetch(BASE + '/api/snapshot')).json();
+    const itemBack = snapBack.snapshot.departments.flatMap((x) => x.groups.flatMap((g) => g.projects)).find((x) => x.id === projWeird.id);
+    check('快照不再给出失效的安装包链接', itemBack?.deliverable === 'web' && !itemBack?.artifactUrl);
+
+    // 带人气记录的项目必须能彻底删除（hit_events 外键）
+    await fetch(BASE + '/api/hit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: projWeird.id, terminal: 't_regression01', kind: 'web' }),
+    });
+    await fetch(BASE + `/api/admin/projects/${projWeird.id}/archive`, { method: 'POST', headers: { Cookie: cookie } });
+    const delRes = await fetch(BASE + `/api/admin/projects/${projWeird.id}`, { method: 'DELETE', headers: { Cookie: cookie } });
+    check('有人气记录的项目可彻底删除（外键清理）', delRes.status === 200, `HTTP ${delRes.status}`);
+
   } finally {
     // 收尾：先通过 API 停掉所有部署（级联杀掉服务端拉起的子进程），再杀测试服务
     try {
-      for (const p of [proj1, proj2, proj3, projPkg].filter(Boolean)) {
+      for (const p of [proj1, proj2, proj3, projPkg, projWeird].filter(Boolean)) {
         await fetch(BASE + `/api/admin/deploys/${p.id}/stop`, { method: 'POST', headers: { Cookie: cookie } }).catch(() => {});
       }
     } catch {
