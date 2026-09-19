@@ -144,8 +144,7 @@ export default function HomePage() {
 
 // 可复制接入卡：下载课程物料包 → 粘贴提示词给 AI 编程助手 → 自动装技能并引导报名
 const INIT_PROMPT =
-  '请把课程物料包解压出的全部技能安装并接入：将 skill/hackathon-reporter、skill/vibecoding-workflow、' +
-  'superpowers/ 下各技能目录复制到你的技能目录（如 .claude/skills/），并执行 npm install -g ./agent-browser 安装浏览器自动化 CLI。' +
+  '请在项目级安装此压缩包里的 4 个 skill（hackathon-reporter、vibecoding-workflow、superpowers、agent-browser），' +
   '安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、项目详情（参与人员、需求、价值、功能、场景；小组未单独提供时用项目名代替），' +
   '然后执行 node skill/hackathon-reporter/scripts/report.js --init 完成报名（幂等），并按八节点流程驱动比赛推进与上报。';
 
@@ -185,7 +184,7 @@ function JoinCard() {
         </span>
       </div>
       <div className="zk-cmd">
-        请把课程物料包解压出的全部技能安装并接入：将 skill/hackathon-reporter、skill/vibecoding-workflow、superpowers/ 下各技能目录复制到你的技能目录（如 .claude/skills/），并执行 npm install -g ./agent-browser 安装浏览器自动化 CLI。安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、项目详情（参与人员、需求、价值、功能、场景；小组未单独提供时用项目名代替），然后执行 node skill/hackathon-reporter/scripts/report.js --init 完成报名（幂等），并按八节点流程驱动比赛推进与上报。
+        请在项目级安装此压缩包里的 4 个 skill（hackathon-reporter、vibecoding-workflow、superpowers、agent-browser），安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、项目详情（参与人员、需求、价值、功能、场景；小组未单独提供时用项目名代替），然后执行 node skill/hackathon-reporter/scripts/report.js --init 完成报名（幂等），并按八节点流程驱动比赛推进与上报。
         <button className={`zk-cmd-copy ${copied ? 'ok' : ''}`} onClick={copy} title="复制提示词">
           {copied ? '已复制 ✓' : '复制'}
         </button>
