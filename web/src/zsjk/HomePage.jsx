@@ -7,9 +7,6 @@ import ProjectDetail from '../dashboard/ProjectDetail.jsx';
 // 首页：banner(170) + video-row(420, mock) + bottom-row(310：讲师 mock + 3 天流程 mock + 参赛接入卡)
 // 预算 170+20+420+20+310+ticker76 = 1016
 
-const INIT_COMMAND =
-  'node skill/hackathon-reporter/scripts/report.js --init --department <岛院名> --group <队伍名> --project <项目名>';
-
 // mock 占位：视频/讲师/流程待真实素材到位后替换（spec §8）
 const VIDEOS = [
   { tag: '开幕回放', dur: '12:48', title: 'AI创变营 · 开幕式', desc: '赛道解读与规则说明' },
@@ -145,15 +142,21 @@ export default function HomePage() {
   );
 }
 
-// 可复制接入卡：下载技能包 → 复制命令交给 AI 编程助手 → 大屏见岛院与项目
+// 可复制接入卡：下载课程物料包 → 粘贴提示词给 AI 编程助手 → 大屏见岛院与项目
+const INIT_PROMPT =
+  '请用本项目 skill/hackathon-reporter 技能帮我完成参赛报名并驱动整个比赛：' +
+  '岛院填「<岛院名>」，小组填「<队伍名>」，项目名为「<项目名>」；' +
+  '先执行 --init 自助报名（幂等，重复执行返回同一密钥），' +
+  '然后按八节点流程用 --next 逐步推进并按时上报，部署与验收分别用 --deploy/--verify，最终提交前先征求我确认。';
+
 function JoinCard() {
   const [copied, setCopied] = React.useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(INIT_COMMAND);
+      await navigator.clipboard.writeText(INIT_PROMPT);
     } catch {
       const ta = document.createElement('textarea');
-      ta.value = INIT_COMMAND;
+      ta.value = INIT_PROMPT;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand('copy');
@@ -174,7 +177,7 @@ function JoinCard() {
         </span>
         <span>
           <b className="st">②</b>
-          <b>复制下方命令</b>，填好三个名字后交给你的 AI 编程助手执行
+          <b>复制下方提示词</b>，把三个名字改好，整段发给你的 AI 编程助手
         </span>
         <span>
           <b className="st">③</b>
@@ -182,12 +185,12 @@ function JoinCard() {
         </span>
       </div>
       <div className="zk-cmd">
-        node skill/hackathon-reporter/scripts/report.js --init --department <i>&lt;岛院名&gt;</i> --group <i>&lt;队伍名&gt;</i> --project <i>&lt;项目名&gt;</i>
-        <button className={`zk-cmd-copy ${copied ? 'ok' : ''}`} onClick={copy} title="复制完整命令">
+        请用本项目 skill/hackathon-reporter 技能帮我完成参赛报名并驱动整个比赛：岛院填「<i>&lt;岛院名&gt;</i>」，小组填「<i>&lt;队伍名&gt;</i>」，项目名为「<i>&lt;项目名&gt;</i>」；先执行 --init 自助报名（幂等），然后按八节点流程用 --next 逐步推进并按时上报，部署与验收分别用 --deploy/--verify，最终提交前先征求我确认。
+        <button className={`zk-cmd-copy ${copied ? 'ok' : ''}`} onClick={copy} title="复制提示词">
           {copied ? '已复制 ✓' : '复制'}
         </button>
       </div>
-      <div className="zk-join-hint">可追加 --members 等参数完善展示；重复执行幂等，不重复发号。</div>
+      <div className="zk-join-hint">无需手敲命令。报名后在对话里补充成员、需求、价值等信息，AI 会同步到大屏展示。</div>
     </>
   );
 }
