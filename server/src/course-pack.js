@@ -72,6 +72,8 @@ function packFingerprint(serverUrl, token) {
     if (!fs.existsSync(m.src)) continue;
     h.update(m.dest).update(treeFingerprint(m.src));
   }
+  // 生成器自身（本文件）也纳入指纹：安装说明/打包逻辑改动后包必须重打，否则旧缓存会继续被下发
+  h.update(fs.readFileSync(__filename));
   h.update(serverUrl).update(token);
   return h.digest('hex').slice(0, 16);
 }
