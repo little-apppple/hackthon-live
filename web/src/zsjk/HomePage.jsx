@@ -145,8 +145,9 @@ export default function HomePage() {
 // 可复制接入卡：下载课程物料包 → 粘贴提示词给 AI 编程助手 → 自动装技能并引导报名
 const INIT_PROMPT =
   '请在项目级安装此压缩包里的 4 个 skill（hackathon-reporter、vibecoding-workflow、superpowers、agent-browser），' +
-  '安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、项目详情（参与人员、需求、价值、功能、场景；小组未单独提供时用项目名代替），' +
-  '然后执行 node skill/hackathon-reporter/scripts/report.js --init 完成报名（幂等），并按八节点流程驱动比赛推进与上报。';
+  '安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、一句话需求（大屏展示用，40 字内；这只是给评委看的简介，' +
+  '正式需求分析稍后单独进行、不在这里收集）、参与人员（人员维度大屏用，建议列全）、可选的价值/功能/场景；小组未单独提供时用项目名代替。' +
+  '收集后执行 node skill/hackathon-reporter/scripts/report.js --init 完成报名（幂等）。';
 
 function JoinCard() {
   const [copied, setCopied] = React.useState(false);
@@ -184,7 +185,7 @@ function JoinCard() {
         </span>
       </div>
       <div className="zk-cmd">
-        请在项目级安装此压缩包里的 4 个 skill（hackathon-reporter、vibecoding-workflow、superpowers、agent-browser），安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、项目详情（参与人员、需求、价值、功能、场景；小组未单独提供时用项目名代替），然后执行 node skill/hackathon-reporter/scripts/report.js --init 完成报名（幂等），并按八节点流程驱动比赛推进与上报。
+        请在项目级安装此压缩包里的 4 个 skill（hackathon-reporter、vibecoding-workflow、superpowers、agent-browser），安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、一句话需求（大屏展示用，40 字内；这只是给评委看的简介，正式需求分析稍后单独进行、不在这里收集）、参与人员（人员维度大屏用，建议列全）、可选的价值/功能/场景；小组未单独提供时用项目名代替。收集后执行 node skill/hackathon-reporter/scripts/report.js --init 完成报名（幂等）。
         <button className={`zk-cmd-copy ${copied ? 'ok' : ''}`} onClick={copy} title="复制提示词">
           {copied ? '已复制 ✓' : '复制'}
         </button>

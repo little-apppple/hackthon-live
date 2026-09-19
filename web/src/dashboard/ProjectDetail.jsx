@@ -17,7 +17,7 @@ export default function ProjectDetail({ project, stages, onClose }) {
   const total = (stages && stages.length) || 8;
   const rows = [
     ['参与人员', project.members],
-    ['需求简述', project.summary],
+    ['一句话需求 · 报名自述', project.summary],
     ['项目价值', project.value],
     ['核心功能', project.features],
     ['应用场景', project.scenario],
@@ -44,7 +44,6 @@ export default function ProjectDetail({ project, stages, onClose }) {
 
         <div className="detail-progress">
           进度 {project.completed_stages}/{total}（{project.progress}%）
-          {project.description ? ` · ${project.description}` : ''}
         </div>
 
         {filled.length === 0 && <div className="detail-empty">该项目注册时未填写展示信息</div>}

@@ -21,7 +21,7 @@ const genClientId = () => 'cli_' + crypto.randomBytes(16).toString('hex');
 
 const USAGE = `用法:
   node report.js --init [--server-url <地址> --access-key <密钥>] [--deploy-url <地址>] [--force]     # 手工模式
-  node report.js --init [--department <部门> --group <小组> --project <项目名>] [--description <简介>]  # 自助注册模式（技能包内置上报地址时自动启用）
+  node report.js --init [--department <部门> --group <小组> --project <项目名>] [--summary <一句话需求>]  # 自助注册模式（技能包内置上报地址时自动启用）
   node report.js --next [--config <路径>]
   node report.js --stage <节点标识|序号> [--message "说明"] [--config <路径>]
   node report.js --status [--config <路径>]
@@ -397,9 +397,17 @@ async function cmdInit(args) {
     const department = args.department;
     const group = args.group;
     const project = args.project;
-    // 展示信息（大屏/后台面板用）：参与人员、需求简述、价值、功能、场景
+    // 展示信息（大屏面板用）：一句话需求、参与人员（人员维度页数据源）、价值、功能、场景；description 兼容保留
     const infoArgs = { members: args.members, summary: args.summary, value: args.value, features: args.features, scenario: args.scenario };
     if (!department || !group || !project) {
+      // 非交互终端（Agent 管道调用等）：问答不会得到回答，静默退出会造成「以为注册成功」的假象
+      if (!process.stdin.isTTY) {
+        console.error('✗ 当前不是交互终端，无法进入问答注册。请一次性带参执行，例如：');
+        console.error('  node report.js --init --department 交规院岛 --group <队伍名> --project <项目名> \\');
+        console.error('    --summary "一句话需求（大屏展示用，40 字内）" --members "张三、李四" \\');
+        console.error('    [--value <价值> --features <功能> --scenario <场景>]');
+        process.exit(2);
+      }
       console.log(`== 黑客松自助注册 ==（服务端：${serverUrl}）`);
       console.log('填写部门 / 小组 / 项目名称，服务端自动录入名单、预留部署端口并发放 accessKey');
       console.log('（幂等：相同「部门/小组/项目名」只发一次密钥，重复执行返回同一密钥）\n');
@@ -412,21 +420,17 @@ async function cmdInit(args) {
         args.department = d;
         args.group = g;
         args.project = p;
-        if (!args.description) {
-          const desc = (await ask(rl, '④ 项目一句话简介（可回车跳过）: ')).trim();
-          if (desc) args.description = desc;
-        }
-        console.log('   以下信息用于大屏/后台展示，建议填写（可回车跳过）：');
+        console.log('   以下信息用于大屏展示，建议填写（可回车跳过）：');
         const askField = async (key, label) => {
           if (args[key]) return;
           const v = (await ask(rl, `${label}: `)).trim();
           if (v) args[key] = v;
         };
-        await askField('members', '⑤ 参与人员（多人用顿号分隔）');
-        await askField('summary', '⑥ 需求简述');
-        await askField('value', '⑦ 项目价值');
-        await askField('features', '⑧ 核心功能');
-        await askField('scenario', '⑨ 应用场景');
+        await askField('summary', '④ 一句话需求（大屏展示用，建议 40 字内；不是流程里的需求分析，例：把现场录入的数据实时投到大屏）');
+        await askField('members', '⑤ 参与人员（用于「人员维度」大屏，建议填写全部成员，顿号分隔）');
+        await askField('value', '⑥ 项目价值');
+        await askField('features', '⑦ 核心功能');
+        await askField('scenario', '⑧ 应用场景');
       } finally {
         rl.close();
       }
@@ -447,15 +451,22 @@ async function cmdInit(args) {
       process.exit(1);
     }
     console.log(`\n→ 向服务端注册（${serverUrl}）…`);
-    const r = await registerOnServer(serverUrl, args.registerToken || baked.registerToken, {
-      department: args.department,
-      group: args.group,
-      project: args.project,
-      description: args.description,
-      clientId,
-      ...infoArgs,
-      deliverable: args.deliverable || (existingCfg || {}).deliverable || 'web',
-    });
+    let r;
+    try {
+      r = await registerOnServer(serverUrl, args.registerToken || baked.registerToken, {
+        department: args.department,
+        group: args.group,
+        project: args.project,
+        description: args.description,
+        clientId,
+        ...infoArgs,
+        deliverable: args.deliverable || (existingCfg || {}).deliverable || 'web',
+      });
+    } catch (e) {
+      console.error(`✗ 注册失败 [${e.code || 'NETWORK_ERROR'}]：${e.message}`);
+      if (e.code === 'NETWORK_ERROR') console.error(`  无法连接赛事服务端 ${serverUrl}，请检查网络与服务地址后重试（注册幂等，可安全重跑）。`);
+      process.exit(1);
+    }
     accessKey = r.accessKey;
     deployUrl = r.deployUrl;
     boundByRegister = true;

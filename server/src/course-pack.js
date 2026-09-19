@@ -118,7 +118,8 @@ router.get('/course-pack', async (req, res, next) => {
     const assetsStamp = fs.existsSync(ASSETS_DIR)
       ? String(fs.statSync(ASSETS_DIR).mtimeMs)
       : 'none';
-    const key = `${tokenHash}:${crypto.createHash('sha1').update(assetsStamp).digest('hex').slice(0, 8)}`;
+    const skillStamp = String(fs.statSync(path.join(ROOT, 'skill')).mtimeMs); // 技能内容变更也需重打包
+    const key = `${tokenHash}:${crypto.createHash('sha1').update(`${assetsStamp}|${skillStamp}`).digest('hex').slice(0, 8)}`;
     const outFile = path.join(CACHE_DIR, `course-pack-${key}.tgz`);
 
     if (!fs.existsSync(outFile) || cacheKey !== key) {

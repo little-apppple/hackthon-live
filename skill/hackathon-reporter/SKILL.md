@@ -27,7 +27,7 @@ description: 黑客松参赛项目进度自动上报、自动部署与线上验�
 
 **模式 A · 自助注册（推荐，技能包内置上报地址与注册令牌时自动启用）**
 
-技能包的 `skill/hackathon-reporter/server.json` 内置了上报地址和本期**注册令牌**（管理员打包时写入）。此时执行 `node <skill目录>/scripts/report.js --init` 会引导填写**部门、小组、项目名称**（Agent 可代填：`--init --department <部门> --group <小组> --project <项目名>`，可选 `--description`，各限 50 字符），发送到服务端 `/api/register` 完成报名：录入名单、预留部署端口、发放 accessKey，并写入服务端审计（stage=register）。
+技能包的 `skill/hackathon-reporter/server.json` 内置了上报地址和本期**注册令牌**（管理员打包时写入）。此时执行 `node <skill目录>/scripts/report.js --init` 会引导填写**部门、小组、项目名称**（Agent 可代填：`--init --department <部门> --group <小组> --project <项目名>`，各限 50 字符），发送到服务端 `/api/register` 完成报名：录入名单、预留部署端口、发放 accessKey，并写入服务端审计（stage=register）。
 
 **幂等与客户端绑定：每个项目首次接入时会生成唯一的客户端标识 `clientId`（`cli_` 开头，保存在 `hackathon.config.json`）并绑定到服务端项目——重复执行 `--init` 按 clientId 幂等返回同一 accessKey（可安全重跑、可多处补发配置）；不同客户端使用完全相同的「部门/小组/项目名」会被拒绝（409 `NAME_TAKEN`），不会互相覆盖进度。**请务必保管好 `hackathon.config.json`（含 clientId）；换机器/重装需一并带走，丢失则由管理员在后台「解绑客户端」后重新接入。若返回的密钥已被管理员吊销，CLI 会停止并提示联系管理员。
 
@@ -187,7 +187,7 @@ node <skill目录>/scripts/report.js --verify --dry   # 只验证不上报
 ## 部署说明（第 6 节点）
 
 - **非 Web 应用（安装包交付）**：`--deploy --type package --file <安装包>` 上传单个安装包，服务端在预留端口发布下载链接（落地页 + 附件直链）；**下载链接可用即视为部署完成**；验收用 `--verify --file <安装包>`（校验探活 + 下载可用 + 大小一致 + 附件头）。支持 exe/msi/zip/7z/tar.gz/apk/dmg/pkg/deb/rpm/jar/appimage。
-- **注册信息**：`--init` 会提示填写参与人员/需求简述/价值/功能/场景（用于大屏展示，可跳过；同客户端重注册可更新）；非 Web 项目加 `--deliverable package`，大屏会标为安装包交付（其「原型设计」节点显示为不涉及）。
+- **注册信息**：`--init` 会提示填写一句话需求（大屏展示用，不是流程里的需求分析）/参与人员（「人员维度」大屏的数据源，建议填全）/价值/功能/场景（均可跳过；同客户端重注册可更新）；非 Web 项目加 `--deliverable package`，大屏会标为安装包交付（其「原型设计」节点显示为不涉及）。
 - **`--deploy` 路径（推荐）**：无需关心端口——服务端解压产物后自动注入 `PORT` 环境变量再启动，项目代码只要监听 `process.env.PORT` 即可（本地开发可回退默认端口）。
 - **手动部署路径**：若不用 `--deploy`，把应用监听端口改为分配的端口（发放配置里的 `deployUrl` 所示）、自行启动成功后再 `--stage deployment` 上报，服务端会探活校验。
 - 部署地址规则：`http://<大屏服务器IP>:<分配端口>`，上线后现场评委通过大屏直接打开。
