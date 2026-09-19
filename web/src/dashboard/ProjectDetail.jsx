@@ -55,7 +55,7 @@ export default function ProjectDetail({ project, stages, onClose }) {
         ))}
 
         <div className="detail-actions">
-          {project.artifactUrl && (
+          {project.artifactUrl && (project.completed_stages || 0) >= 6 && (
             <a className="detail-link" href={project.artifactUrl} target="_blank" rel="noreferrer" >
               ⬇ 下载安装包
             </a>

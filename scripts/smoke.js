@@ -472,6 +472,8 @@ async function api(method, path, body, useAuth = true) {
       JSON.stringify(submitted)
     );
     check('KPI 统计已提交数', snapSub.data.snapshot.kpi.submitted === 1, JSON.stringify(snapSub.data.snapshot.kpi));
+
+
   }
 
   console.log(`\n== 13. 安全加固 ==`);
@@ -673,6 +675,36 @@ async function api(method, path, body, useAuth = true) {
 
   }
 
+
+  console.log(`
+== 15.5 提交后再次 loop 的残留收敛（评审用例）==`);
+  {
+    // 提交后写 AI 参考分 → 再次 loop：上一轮残留（AI 分/安装包直链/已提交榜）必须全部收敛
+    const scored = await api('POST', '/api/score', { accessKey: key1, score: 62, detail: { dims: {} } }, false);
+    check('提交后可写 AI 参考分', scored.data.ok && scored.data.score === 62, JSON.stringify(scored.data));
+    await new Promise((r) => setTimeout(r, 10000));
+    const loopAgain = await api('POST', '/api/loop', { accessKey: key1 }, false);
+    check('二轮再 loop 成功（LOOP×3）', loopAgain.data.ok && loopAgain.data.loopCount === 3, JSON.stringify(loopAgain.data));
+    check('提交态 loop 返回解冻提示', loopAgain.data.unfroze === true && /解冻/.test(loopAgain.data.message));
+    const stAfterLoop = await fetch(base + '/api/report/status', { headers: { 'x-access-key': key1 } }).then((r) => r.json());
+    const scoreGet = await fetch(base + '/api/score', { headers: { 'x-access-key': key1 } }).then((r) => r.json());
+    check('loop 后 AI 分已清空（status/查询接口）', stAfterLoop.score === null && scoreGet.score === null, JSON.stringify({ st: stAfterLoop.score, get: scoreGet.score }));
+    const snapAfterLoop = await api('GET', '/api/snapshot', undefined, false);
+    const mineAfterLoop = snapAfterLoop.data.snapshot.departments
+      .flatMap((d) => d.groups.flatMap((g) => g.projects))
+      .find((p) => p.id === created[0].id);
+    check(
+      'loop 后快照收敛（0% / 无 AI 分 / 无安装包直链 / 不在已提交榜）',
+      mineAfterLoop.completed_stages === 0 &&
+        mineAfterLoop.progress === 0 &&
+        mineAfterLoop.ai_score === null &&
+        !mineAfterLoop.artifactUrl &&
+        snapAfterLoop.data.snapshot.submittedProjects.length === 0,
+      JSON.stringify({ cs: mineAfterLoop.completed_stages, ai: mineAfterLoop.ai_score, art: mineAfterLoop.artifactUrl })
+    );
+    const hitAfterLoop = await fetch(base + `/api/hit/go?projectId=${created[0].id}`, { redirect: 'manual' });
+    check('loop 后链接入口熄灭（302 回大屏）', hitAfterLoop.status === 302 && hitAfterLoop.headers.get('location') === '/');
+  }
 
   console.log(`
 结果: ${passed} 通过, ${failed} 失败`);

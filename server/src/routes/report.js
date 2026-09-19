@@ -143,9 +143,9 @@ router.post('/report', aw(async (req, res) => {
       `UPDATE projects
           SET completed_stages = ?, status = ?, last_report_at = datetime('now','localtime'),
               updated_at = datetime('now','localtime')
-        WHERE id = ? AND revoked = 0 AND archived = 0`
+        WHERE id = ? AND revoked = 0 AND archived = 0 AND loop_count = ?`
     )
-    .run(st.index, newStatus, project.id);
+    .run(st.index, newStatus, project.id, project.loop_count || 1);
   if (upd.changes === 0) {
     audit(project.id, st.id, 0, 'INVALID_KEY', msg, ip);
     return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: '项目状态已变化（可能被吊销/归档/迭代），请重新查询' });
@@ -188,6 +188,12 @@ router.post('/report', aw(async (req, res) => {
 const CLIENT_ID_RE = /^cli_[0-9a-f]{32}$/;
 const registerAttempts = new Map(); // ip -> epoch ms 数组
 const loopLastAt = new Map(); // projectId -> epoch ms（loop 每项目 10s 窗口）
+setInterval(() => {
+  const cutoff = Date.now() - 60000;
+  for (const [id, ts] of loopLastAt) {
+    if (ts < cutoff) loopLastAt.delete(id);
+  }
+}, 60 * 1000).unref();
 
 let lastHitNotifyAt = 0; // 人气广播节流（最多每 2 秒一次）
 
@@ -439,14 +445,7 @@ router.post('/loop', aw(async (req, res) => {
   if (!project || project.archived) {
     return res.status(404).json({ ok: false, code: 'INVALID_KEY', error: 'accessKey 无效' });
   }
-  // 每项目 10 秒窗口限频：防 agent 死循环误调把轮次刷爆（复用 /report 的窗口语义）
-  const now = Date.now();
-  const lastLoopAt = loopLastAt.get(project.id) || 0;
-  if (now - lastLoopAt < 10000) {
-    const retryAfter = Math.ceil((10000 - (now - lastLoopAt)) / 1000);
-    return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: `操作过于频繁，请 ${retryAfter} 秒后重试`, retryAfterSeconds: retryAfter });
-  }
-  loopLastAt.set(project.id, now);
+  // 全部校验通过后才落限频窗口：被拒请求不消耗窗口（与 /report 的约定一致，409 自愈可立即重试）
   if (project.revoked) {
     audit(project.id, 'loop', 0, 'KEY_REVOKED', '', ip);
     return res.status(403).json({ ok: false, code: 'KEY_REVOKED', error: '该 accessKey 已被管理员吊销，请联系管理员' });
@@ -461,11 +460,23 @@ router.post('/loop', aw(async (req, res) => {
       nextStage: stageByIndex(project.completed_stages + 1),
     });
   }
+  const now = Date.now();
+  const lastLoopAt = loopLastAt.get(project.id) || 0;
+  if (now - lastLoopAt < 10000) {
+    const retryAfter = Math.ceil((10000 - (now - lastLoopAt)) / 1000);
+    audit(project.id, 'loop', 0, 'RATE_LIMITED', '', ip);
+    return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: `操作过于频繁，请 ${retryAfter} 秒后重试`, retryAfterSeconds: retryAfter });
+  }
+  loopLastAt.set(project.id, now);
+
   const wasSubmitted = project.completed_stages >= STAGES.length;
   const newLoop = project.loop_count + 1;
+  // 重置进度并清空上一轮的 AI 参考分（历史留在 reports 审计行的 score 记录里，不丢证据；
+  // 否则 loop 后详情弹窗/后台仍会展示上一轮的 AI 分，与 0% 进度自相矛盾）
   db.prepare(
     `UPDATE projects
         SET loop_count = ?, completed_stages = 0, status = 'active',
+            ai_score = NULL, ai_score_detail = NULL, ai_scored_at = NULL,
             last_report_at = datetime('now','localtime'),
             updated_at = datetime('now','localtime')
       WHERE id = ? AND revoked = 0 AND archived = 0`
@@ -487,7 +498,10 @@ router.post('/loop', aw(async (req, res) => {
     completedStages: 0,
     progress: 0,
     nextStage: stageByIndex(1),
-    message: `已进入第 ${newLoop} 轮迭代：调整需求后重新走流程，历史记录保留在审计中`,
+    unfroze: wasSubmitted,
+    message: wasSubmitted
+      ? `已进入第 ${newLoop} 轮迭代：⚠ 上一轮定格的参赛作品已解冻（从「已提交作品」榜撤下），重走完流程后需由用户本人再次 --submit`
+      : `已进入第 ${newLoop} 轮迭代：调整需求后重新走流程，历史记录保留在审计中`,
   });
 }));
 
@@ -744,7 +758,7 @@ router.get('/report/status', (req, res) => {
   const stat = db
     .prepare(
       `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS rejects,
+              SUM(CASE WHEN ok = 0 AND stage != 'loop' THEN 1 ELSE 0 END) AS rejects,
               SUM(CASE WHEN reject_code = 'STAGE_OUT_OF_ORDER' THEN 1 ELSE 0 END) AS outOfOrder,
               SUM(CASE WHEN reject_code = 'RATE_LIMITED' THEN 1 ELSE 0 END) AS rateLimited,
               SUM(CASE WHEN reject_code = 'INVALID_STAGE' THEN 1 ELSE 0 END) AS invalidStage

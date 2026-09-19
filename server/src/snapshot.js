@@ -86,7 +86,8 @@ function buildSnapshot(eventId) {
     p.link = config.publicHost ? `http://${config.publicHost}:${p.port}` : null;
     p.department = null;
     p.grp = null;
-    p.artifactUrl = p.deliverable === 'package' && p.artifact_name && config.publicHost ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null;
+    // 与 link 同口径：未到「上线部署」节点（含 loop 重置后）不下发安装包直链，避免详情弹窗露出上一轮产物
+    p.artifactUrl = p.deliverable === 'package' && p.artifact_name && config.publicHost && p.completed_stages >= DEPLOY_STAGE_INDEX ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null;
     // 停滞/活跃信号：当前节点从上次成功上报开始计时；last_seen_at 由 CLI 调用（--next/--status/上报）续期
     p.stageStartedAt = p.last_report_at || p.created_at;
     p.lastSeenAt = p.last_seen_at || null;
@@ -184,7 +185,7 @@ function buildSnapshot(eventId) {
     )
     .all(eid)
     .map((p) => ({ ...p, progress: progressPercent(p.completed_stages || 0), link: config.publicHost ? `http://${config.publicHost}:${p.port}` : null,
-      artifactUrl: p.deliverable === 'package' && p.artifact_name && config.publicHost ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null }));
+      artifactUrl: p.deliverable === 'package' && p.artifact_name && config.publicHost && (p.completed_stages || 0) >= DEPLOY_STAGE_INDEX ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null }));
 
   // 已提交（最终参赛作品）列表：按提交时间倒序，供大屏「已完成项目列表」与烟花通知使用
   const submittedProjects = db
@@ -203,7 +204,7 @@ function buildSnapshot(eventId) {
       ...p,
       progress: progressPercent(p.completed_stages || 0),
       link: config.publicHost ? `http://${config.publicHost}:${p.port}` : null,
-      artifactUrl: p.deliverable === 'package' && p.artifact_name && config.publicHost ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null,
+      artifactUrl: p.deliverable === 'package' && p.artifact_name && config.publicHost && (p.completed_stages || 0) >= DEPLOY_STAGE_INDEX ? `http://${config.publicHost}:${p.port}/${p.artifact_name}` : null,
     }));
 
   return {

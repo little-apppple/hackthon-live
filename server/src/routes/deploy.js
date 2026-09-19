@@ -11,6 +11,12 @@ const aw = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 
 // 部署限频：每项目 10 秒一次（防持 key 者并发推包打爆内存/磁盘）
 const deployLastAt = new Map(); // projectId -> epoch ms
+setInterval(() => {
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [id, ts] of deployLastAt) {
+    if (ts < cutoff) deployLastAt.delete(id);
+  }
+}, 5 * 60 * 1000).unref();
 
 function findProject(req) {
   const accessKey = req.query.accessKey || req.headers['x-access-key'];
