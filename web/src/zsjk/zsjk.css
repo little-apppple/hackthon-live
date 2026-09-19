@@ -30,7 +30,7 @@
 .zk-live-text.off { color: var(--txt-bright); animation: pulse 1.2s ease infinite; }
 .zk-admin-link { font-size: 13px; color: var(--txt-dim); border: 1px solid var(--line); border-radius: 4px; padding: 4px 12px; letter-spacing: 1px; }
 .zk-admin-link:hover { color: var(--txt-bright); border-color: var(--red); }
-@keyframes zkMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes zkMarquee { from { transform: translateX(0); } to { transform: translateX(calc(-100% / var(--copies, 2))); } }
 
 /* ---------- navpill 迷你页导航（fixed 竖排贴左边缘，不占内容预算、不压 64px 内容区） ---------- */
 .zk-navpill { position: fixed; left: 16px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 10px; z-index: 40; }
@@ -40,9 +40,6 @@
 }
 .zk-navpill a:hover { color: var(--txt-bright); }
 .zk-navpill a.active { color: var(--white); border-color: var(--red); box-shadow: var(--glow-red); }
-
-/* ---------- 实时同步关闭：整体置灰 ---------- */
-.zk-off .zk-dimmable { filter: grayscale(1); opacity: 0.45; pointer-events: none; }
 
 /* ---------- 首页 ---------- */
 .zk-banner { flex: 0 0 170px; display: flex; gap: 24px; }
@@ -168,7 +165,7 @@
 .zk-island::after { content: ''; position: absolute; top: 0; left: -80%; width: 55%; height: 100%; background: linear-gradient(100deg, transparent, rgba(232, 90, 58, 0.10), transparent); pointer-events: none; }
 .zk-island.lit-anim:hover::after { animation: zkSweep 1.1s ease; }
 @keyframes zkSweep { from { left: -80%; } to { left: 130%; } }
-.zk-island-name { display: flex; align-items: center; gap: 12px; font-size: 23px; color: var(--txt-bright); letter-spacing: 3px; flex: 0 0 auto; }
+.zk-island-name { display: flex; align-items: center; gap: 12px; font-size: 23px; color: var(--txt-bright); letter-spacing: 3px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zk-island-name::before { content: ''; width: 9px; height: 9px; background: var(--red); box-shadow: var(--glow-red); flex: 0 0 auto; }
 .zk-island-nums { flex: 1 1 0; min-height: 0; display: flex; align-items: flex-end; justify-content: space-between; padding-bottom: 12px; gap: 12px; }
 .zk-mlabel { display: block; font-size: 13px; color: var(--txt-dim); letter-spacing: 2px; margin-bottom: 6px; }
@@ -235,7 +232,7 @@
 .zk4-kpi span { display: block; margin-top: 4px; font-size: 12px; color: var(--txt-dim); letter-spacing: 2px; }
 
 .zk4-table { flex: 1 1 0; min-height: 0; margin-top: 24px; border: 1px solid var(--line); background: rgba(13, 13, 13, 0.82); display: flex; flex-direction: column; }
-.zk4-thead { flex: 0 0 54px; display: grid; grid-template-columns: 420px 200px 1fr 1fr; gap: 32px; align-items: center; padding: 0 22px; background: rgba(200, 200, 200, 0.05); border-bottom: 1px solid var(--line); }
+.zk4-thead { flex: 0 0 54px; display: grid; grid-template-columns: 420px 200px 1fr 1fr 28px; gap: 32px; align-items: center; padding: 0 22px; background: rgba(200, 200, 200, 0.05); border-bottom: 1px solid var(--line); }
 .zk4-th { display: flex; align-items: center; gap: 7px; font-size: 14px; letter-spacing: 2px; color: var(--txt-dim); background: none; border: none; text-align: left; padding: 0; font-family: inherit; }
 .zk4-th:hover { color: var(--txt-bright); }
 .zk4-th.active { color: var(--red-hot); }

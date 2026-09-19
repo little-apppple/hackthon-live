@@ -7,7 +7,7 @@ import HotList from '../dashboard/HotList.jsx';
 import { aggregateIslands, groupIslands, orderIslands } from './model.js';
 
 // 作战地图：标题(150) + 岛院卡 3 列(488) + 四图(254)，预算 150+24+488+24+254+ticker76 = 1016
-// 每座岛院有独立「点亮」开关（localStorage 按岛持久化）：
+// 每座岛院有独立「点亮」开关（localStorage 持久化，键含活动 id 防止换库/重建后 id 复用串状态）：
 //   关 → 该岛卡置灰（四图中同步置灰）；开 → 火焰扫过卡片由灰转亮
 const OFF_KEY = 'zk-island-off-';
 
@@ -29,18 +29,18 @@ export default function MapPage() {
   const [offMap, setOffMap] = React.useState(readOffMap);
   const [litTick, setLitTick] = React.useState({}); // 每次点亮 +1：重挂卡片以重放点火动画
 
+  const scopedKey = (id) => `${snapshot?.eventId ?? 0}:${id}`;
   const toggleIsland = (e, id) => {
     e.stopPropagation(); // 不触发岛卡跳转
-    setOffMap((m) => {
-      const nowOff = !m[id]; // 当前开着 → 点完熄灭；反之点亮
-      try {
-        localStorage.setItem(OFF_KEY + id, nowOff ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
-      if (!nowOff) setLitTick((t) => ({ ...t, [id]: (t[id] || 0) + 1 })); // 点亮时重放火焰
-      return { ...m, [id]: nowOff };
-    });
+    const key = scopedKey(id);
+    const nowOff = !offMap[key]; // 当前开着 → 点完熄灭；反之点亮
+    try {
+      localStorage.setItem(OFF_KEY + key, nowOff ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+    if (!nowOff) setLitTick((t) => ({ ...t, [id]: (t[id] || 0) + 1 })); // 点亮时重放火焰
+    setOffMap((m) => ({ ...m, [key]: nowOff }));
   };
 
   if (!snapshot) return <ZsjkBoot />;
@@ -52,14 +52,14 @@ export default function MapPage() {
   const dimNames = orderedIslands.filter((i) => offMap[i.id]).map((i) => i.name);
 
   const renderIsland = (island, gi, i) => {
-    const off = !!offMap[island.id];
+    const off = !!offMap[scopedKey(island.id)];
     return (
       <div
         key={`${island.id}:${off ? 'off' : `lit${litTick[island.id] || 0}`}`}
         className={`zk-island ${off ? 'is-off' : 'lit-anim'}`}
         style={{ '--i': gi * 4 + i }}
         onClick={() => navigate(`/zsjk/island?unit=${island.id}`)}
-        title={off ? '该岛已熄灭，点击开关点亮' : '点击进入岛屿详情'}
+        title={off ? '已熄灭 · 点右侧开关点亮 · 点卡片看详情' : '点击进入岛屿详情'}
       >
         <span className="zk-flame" />
         <div className="zk-island-head">

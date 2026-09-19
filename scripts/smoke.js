@@ -285,6 +285,9 @@ async function api(method, path, body, useAuth = true) {
       end: Math.max(...reservedPorts),
     });
     check('区间被占满仍可保存（只影响新分配）', full.data.ok);
+    // 「只影响新分配」的另一半：区间耗尽后新建项目应返回可读的 503，而非 500/挂起
+    const overflow = await api('POST', '/api/admin/projects', { groupId: groups.data.groups[0].id, name: '溢出校验项目' });
+    check('区间耗尽后新建项目返回 503', overflow.status === 503 && /端口/.test(overflow.data.error || ''), JSON.stringify(overflow.data));
 
     // 10.6 恢复默认区间并清理
     const restore = await api('PUT', '/api/admin/ports', { start: 4100, end: 4999 });
@@ -393,9 +396,20 @@ async function api(method, path, body, useAuth = true) {
     const gzipMagic = buf[0] === 0x1f && buf[1] === 0x8b;
     check('物料包可公开下载（gzip 流）', pack.status === 200 && gzipMagic && buf.length > 10240, `HTTP ${pack.status} ${buf.length}B`);
     check('下载响应带附件文件名', /attachment/.test(pack.headers.get('content-disposition') || ''));
-    // 再次下载命中缓存：字节数一致
-    const again = Buffer.from(await (await fetch(base + '/api/course-pack')).arrayBuffer());
-    check('重复下载命中缓存（内容一致）', again.length === buf.length);
+    // 再次下载命中缓存：ETag 一致（服务端文件未重写）+ 字节一致
+    const again = await fetch(base + '/api/course-pack');
+    const buf2 = Buffer.from(await again.arrayBuffer());
+    const etag = pack.headers.get('etag');
+    check('重复下载命中缓存（ETag 与内容一致）', !!etag && again.headers.get('etag') === etag && buf2.length === buf.length);
+    // 内容校验：包内 server.json 烘焙的是本机当前地址与当期注册令牌（防「烘错主机/令牌」静默通过）
+    const zlib = require('zlib');
+    const raw = zlib.gunzipSync(buf);
+    const token = (await api('GET', '/api/admin/register-token')).data.token;
+    check(
+      '包内 server.json 烘焙本机地址与当期令牌',
+      raw.includes(Buffer.from(`"serverUrl": "${base}"`)) && raw.includes(Buffer.from(token)),
+      `期望 serverUrl=${base}`
+    );
   }
 
   console.log(`\n== 12. 迭代（loop）与最终提交（submission）==`);

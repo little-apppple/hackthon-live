@@ -109,7 +109,7 @@ node skill/hackathon-reporter/scripts/report.js --init \
   部署端口: 4100（http://47.108.217.153:4100）
 ```
 
-**注册信息（用于大屏/后台展示）**：`--init` 会依次提示填写 参与人员 / 需求简述 / 项目价值 / 核心功能 / 应用场景（均可回车跳过）。也可一次性带参：
+**注册信息（用于大屏/后台展示）**：`--init` 会依次提示填写 一句话需求（展示用，非流程里的需求分析）/ 参与人员（人员维度页数据源，建议填全）/ 项目价值 / 核心功能 / 应用场景（均可回车跳过）。也可一次性带参：
 
 ```bash
 node skill/hackathon-reporter/scripts/report.js --init --department 研发中心 --group 先锋队 --project 智能周报助手 \

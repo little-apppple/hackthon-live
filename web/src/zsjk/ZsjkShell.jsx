@@ -14,16 +14,15 @@ const ASCII_LOGO = String.raw`
 `;
 
 // zsjk 四页共用骨架：stage 1920×1080 缩放 → pad(32/64) → 页面内容(flex:1) + ticker(56+20)
-// syncOn=false 时 stage 加 .zk-off（岛卡/图表置灰、ticker 停止），由作战地图页开关控制
 // 全局附加：通知中心（提交烟花/阶段气泡，?celebrate=1 彩排）+ ticker 上的连接状态与管理后台入口
-export default function ZsjkShell({ snapshot, connected = true, syncOn = true, dimmable = false, children }) {
+export default function ZsjkShell({ snapshot, connected = true, children }) {
   const celebrate = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('celebrate') === '1';
   return (
     <Scale>
-      <div className={`zk-stage ${dimmable && !syncOn ? 'zk-off' : ''}`}>
+      <div className="zk-stage">
         <div className="zk-pad">
           <div className="zk-page">{children}</div>
-          <Ticker events={snapshot?.events} running={syncOn} connected={connected} />
+          <Ticker events={snapshot?.events} connected={connected} />
         </div>
         <nav className="zk-navpill">
           <NavLink to="/zsjk" end>首页</NavLink>

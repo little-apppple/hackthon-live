@@ -69,7 +69,7 @@ export default function IslandPage() {
         <div className="zk3-thead">
           <span>项目名称 / 编号</span>
           <span>进度节点（需求 → 提交 · 8 节点）</span>
-          <span>项目说明（人员 · 需求 · 价值）</span>
+          <span>项目说明（人员 · 一句话需求 · 价值）</span>
         </div>
         <div className="zk3-tbody">
           {shown.length === 0 && <div className="zk3-empty">暂无岛院数据</div>}
@@ -138,10 +138,9 @@ function isPlayable(p) {
   return !p.revoked && p.completed_stages >= 6 && !!(p.link || p.artifactUrl);
 }
 
-// 分钟差（以服务端时间为基准，避免终端时钟偏差）；解析失败返回 null
-function minutesSince(iso, serverIso) {
-  if (!iso) return null;
-  const t = new Date(String(iso).replace(' ', 'T')).getTime();
+// 分钟差：优先用快照下发的 epoch 毫秒（stageStartedAtMs/lastSeenAtMs），避免浏览器与服务端时区不一致时字符串解析偏差
+function minutesSince(ms, iso, serverIso) {
+  const t = Number.isFinite(ms) ? ms : iso ? new Date(String(iso).replace(' ', 'T')).getTime() : NaN;
   const base = serverIso ? new Date(serverIso).getTime() : Date.now();
   if (!Number.isFinite(t) || !Number.isFinite(base)) return null;
   return Math.max(0, Math.round((base - t) / 60000));
@@ -166,8 +165,8 @@ function StatusLine({ project, stages, serverTime }) {
   } else if (project.status === 'done') {
     text = '线上验收通过 · 待最终提交';
   } else {
-    const stalledMin = minutesSince(project.stageStartedAt, serverTime);
-    const seenMin = minutesSince(project.lastSeenAt, serverTime);
+    const stalledMin = minutesSince(project.stageStartedAtMs, project.stageStartedAt, serverTime);
+    const seenMin = minutesSince(project.lastSeenAtMs, project.lastSeenAt, serverTime);
     const seenTxt = seenMin !== null && seenMin >= 15 ? `（最近活动 ${fmtMin(seenMin)}前）` : '';
     if (stalledMin !== null && stalledMin >= 30) {
       stalled = true;

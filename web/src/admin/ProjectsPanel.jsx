@@ -399,7 +399,7 @@ function CreatedModal({ info, onClose }) {
 function ProjectInfoModal({ project, onClose }) {
   const rows = [
     ['参与人员', project.members],
-    ['需求简述', project.summary],
+    ['一句话需求（报名自述）', project.summary],
     ['项目价值', project.value],
     ['核心功能', project.features],
     ['应用场景', project.scenario],

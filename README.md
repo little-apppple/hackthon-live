@@ -113,6 +113,7 @@ node skill/vibecoding-workflow/scripts/setup.js --project <目录>  # 面向其�
 | `REGISTER_RATE_LIMIT_PER_MIN` | 10 | 自助注册每 IP 每分钟上限 |
 | `DEPLOY_RATE_LIMIT_MS` | 10000 | 同一项目两次部署的最小间隔（自动部署防刷） |
 | `DEPLOY_START_TIMEOUT_MS` | 60000 | 部署启动探活超时 |
+| `COURSE_PACK_RATE_PER_MIN` | 10 | 课程物料包（/api/course-pack）每 IP 每分钟下载上限 |
 
 生产环境启动示例：
 

@@ -463,8 +463,10 @@ async function cmdInit(args) {
         deliverable: args.deliverable || (existingCfg || {}).deliverable || 'web',
       });
     } catch (e) {
-      console.error(`✗ 注册失败 [${e.code || 'NETWORK_ERROR'}]：${e.message}`);
-      if (e.code === 'NETWORK_ERROR') console.error(`  无法连接赛事服务端 ${serverUrl}，请检查网络与服务地址后重试（注册幂等，可安全重跑）。`);
+      // fetch 连接失败是 TypeError('fetch failed')，真实原因在 cause.code（如 ECONNREFUSED）；超时为 TimeoutError
+      const code = e?.cause?.code || e?.code || (e?.name === 'TimeoutError' ? 'TIMEOUT' : 'NETWORK_ERROR');
+      console.error(`✗ 注册失败 [${code}]：${e.message}`);
+      console.error(`  无法连接赛事服务端 ${serverUrl}，请检查网络与服务地址后重试（注册幂等，可安全重跑）。`);
       process.exit(1);
     }
     accessKey = r.accessKey;

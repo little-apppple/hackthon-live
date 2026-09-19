@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 
-// 项目详情弹层：展示注册时采集的信息（参与人员/需求简述/价值/功能/场景）与交付形态
+// 项目详情弹层：展示注册时采集的信息（参与人员/一句话需求·报名自述/价值/功能/场景）与交付形态
 // 点击项目卡或已提交榜项打开；点击遮罩或按 Esc 关闭
 export default function ProjectDetail({ project, stages, onClose }) {
   useEffect(() => {

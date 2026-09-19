@@ -3,6 +3,8 @@
 // 覆盖：members 拆分去重 / 岛院聚合（=部门，小组归并）/ 人员聚合（跨项目同名合并）/ KPI / 排序
 // 口径与旧大屏一致：进度用快照 progress（加权），人气 hits 合计；revoked 项目随 deptTree 展示即计入
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 let passed = 0;
 let failed = 0;
@@ -147,6 +149,21 @@ function dept(id, name, progress, groups) {
   });
   await t('空数据全 0', () => {
     assert.deepStrictEqual(m.peopleKpis([]), { total: 0, avgPer: 0, avgCompletion: 0, maxHits: 0 });
+  });
+
+  console.log('== 口径一致性加固（评审补充）==');
+  await t('aggregateIslands：revoked 项目计入岛院计数与人气（与旧屏 deptTree 口径一致）', () => {
+    const withRevoked = [
+      dept(9, 'X院', 10, [grp(91, 'g', [proj(901, 'p1', { members: '甲', revoked: true, hits: 7 }), proj(902, 'p2', { members: '乙' })])]),
+    ];
+    const isl = m.aggregateIslands(withRevoked)[0];
+    assert.strictEqual(isl.projectCount, 2);
+    assert.strictEqual(isl.hits, 7);
+  });
+  await t('data/seed-zsjk.json 的岛名与发布图固定名单完全一致（防改名/写错静默落兜底组）', () => {
+    const seed = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'seed-zsjk.json'), 'utf8'));
+    const names = (seed.departments || []).map((d) => (typeof d === 'string' ? d : d.name));
+    assert.deepStrictEqual(names, m.ISLAND_ORDER);
   });
 
   console.log('== sortPeople ==');
