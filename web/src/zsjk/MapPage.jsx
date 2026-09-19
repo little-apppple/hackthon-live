@@ -4,7 +4,7 @@ import * as echarts from 'echarts';
 import ZsjkShell, { ZsjkBoot } from './ZsjkShell.jsx';
 import { useSnapshot } from '../useSnapshot.js';
 import HotList from '../dashboard/HotList.jsx';
-import { aggregateIslands, groupIslands } from './model.js';
+import { aggregateIslands, groupIslands, orderIslands } from './model.js';
 
 // 作战地图：标题(150) + 岛院卡 3 列(488) + 三图(254)，预算 150+24+488+24+254+ticker76 = 1016
 // 右上角「实时同步」开关：localStorage 持久化；关闭 → 岛卡/图表置灰、ticker 停止
@@ -22,6 +22,7 @@ export default function MapPage() {
   if (!snapshot) return <ZsjkBoot />;
   const islands = aggregateIslands(snapshot.departments);
   const islandGroups = groupIslands(islands);
+  const orderedIslands = orderIslands(islands); // 三图同横轴同序=发布图固定顺序（名单外岛院殿后）
   const totalProjects = islands.reduce((s, i) => s + i.projectCount, 0);
   const waiting = (snapshot.loadingProjects || []).length;
 
@@ -105,13 +106,13 @@ export default function MapPage() {
 
       <div className="zk-charts zk-dimmable">
         <div className="zk-chart">
-          <IslandChart title="立项数" unit=" 个" islands={islands} field="projectCount" red />
+          <IslandChart title="立项数" unit=" 个" islands={orderedIslands} field="projectCount" red />
         </div>
         <div className="zk-chart">
-          <IslandChart title="进度值（加权）" unit="%" islands={islands} field="progress" max={100} />
+          <IslandChart title="进度值（加权）" unit="%" islands={orderedIslands} field="progress" max={100} />
         </div>
         <div className="zk-chart">
-          <IslandChart title="岛院人气值 · 按项目汇总" unit="" islands={islands} field="hits" red />
+          <IslandChart title="岛院人气值 · 按项目汇总" unit="" islands={orderedIslands} field="hits" red />
         </div>
         <div className="zk-chart">
           <div className="zk-card-title">
