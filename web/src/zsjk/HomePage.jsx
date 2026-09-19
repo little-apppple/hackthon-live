@@ -172,7 +172,7 @@ function JoinCard() {
           <a className="zk-join-dl" href="/api/course-pack" download="ai-camp-course-pack.tgz" title="下载课程物料包（含参赛上报技能 + superpowers + agent-browser，已内置上报地址）">
             下载课程物料包
           </a>
-          ，解压到参赛项目根目录
+          （提示词交给 AI 助手即可，无需手动解压）
         </span>
         <span>
           <b className="st">②</b>
