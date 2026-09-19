@@ -142,12 +142,12 @@ export default function HomePage() {
   );
 }
 
-// 可复制接入卡：下载课程物料包 → 粘贴提示词给 AI 编程助手 → 大屏见岛院与项目
+// 可复制接入卡：下载课程物料包 → 粘贴提示词给 AI 编程助手 → 自动装技能并引导报名
 const INIT_PROMPT =
-  '请用本项目 skill/hackathon-reporter 技能帮我完成参赛报名并驱动整个比赛：' +
-  '岛院填「<岛院名>」，小组填「<队伍名>」，项目名为「<项目名>」；' +
-  '先执行 --init 自助报名（幂等，重复执行返回同一密钥），' +
-  '然后按八节点流程用 --next 逐步推进并按时上报，部署与验收分别用 --deploy/--verify，最终提交前先征求我确认。';
+  '请把课程物料包解压出的全部技能安装并接入：将 skill/hackathon-reporter、skill/vibecoding-workflow、' +
+  'superpowers/ 下各技能目录复制到你的技能目录（如 .claude/skills/），并执行 npm install -g ./agent-browser 安装浏览器自动化 CLI。' +
+  '安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、项目详情（参与人员、需求、价值、功能、场景；小组未单独提供时用项目名代替），' +
+  '然后执行 node skill/hackathon-reporter/scripts/report.js --init 完成报名（幂等），并按八节点流程驱动比赛推进与上报。';
 
 function JoinCard() {
   const [copied, setCopied] = React.useState(false);
@@ -177,7 +177,7 @@ function JoinCard() {
         </span>
         <span>
           <b className="st">②</b>
-          <b>复制下方提示词</b>，把三个名字改好，整段发给你的 AI 编程助手
+          <b>复制下方提示词</b>发给 AI 编程助手：它会装好全部技能，并逐项问你报名信息
         </span>
         <span>
           <b className="st">③</b>
@@ -185,12 +185,12 @@ function JoinCard() {
         </span>
       </div>
       <div className="zk-cmd">
-        请用本项目 skill/hackathon-reporter 技能帮我完成参赛报名并驱动整个比赛：岛院填「<i>&lt;岛院名&gt;</i>」，小组填「<i>&lt;队伍名&gt;</i>」，项目名为「<i>&lt;项目名&gt;</i>」；先执行 --init 自助报名（幂等），然后按八节点流程用 --next 逐步推进并按时上报，部署与验收分别用 --deploy/--verify，最终提交前先征求我确认。
+        请把课程物料包解压出的全部技能安装并接入：将 skill/hackathon-reporter、skill/vibecoding-workflow、superpowers/ 下各技能目录复制到你的技能目录（如 .claude/skills/），并执行 npm install -g ./agent-browser 安装浏览器自动化 CLI。安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、项目详情（参与人员、需求、价值、功能、场景；小组未单独提供时用项目名代替），然后执行 node skill/hackathon-reporter/scripts/report.js --init 完成报名（幂等），并按八节点流程驱动比赛推进与上报。
         <button className={`zk-cmd-copy ${copied ? 'ok' : ''}`} onClick={copy} title="复制提示词">
           {copied ? '已复制 ✓' : '复制'}
         </button>
       </div>
-      <div className="zk-join-hint">无需手敲命令。报名后在对话里补充成员、需求、价值等信息，AI 会同步到大屏展示。</div>
+      <div className="zk-join-hint">报名信息之后也能在对话里补充，AI 会同步到大屏展示；重复执行幂等。</div>
     </>
   );
 }

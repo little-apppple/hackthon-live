@@ -94,7 +94,9 @@
 .zk-join-steps { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--txt-dim); line-height: 1.45; }
 .zk-join-steps b { color: var(--txt); font-weight: normal; }
 .zk-join-steps .st { color: var(--red-hot); margin-right: 6px; }
-.zk-cmd { position: relative; margin-top: 12px; background: #000; border: 1px solid var(--line); padding: 12px 92px 12px 14px; font-size: 14px; line-height: 1.6; color: var(--txt-bright); word-break: break-all; }
+.zk-cmd { position: relative; margin-top: 12px; background: #000; border: 1px solid var(--line); padding: 12px 92px 12px 14px; font-size: 14px; line-height: 1.6; color: var(--txt-bright); word-break: break-all; max-height: 158px; overflow-y: auto; }
+.zk-cmd::-webkit-scrollbar { width: 5px; }
+.zk-cmd::-webkit-scrollbar-thumb { background: rgba(194, 59, 34, 0.4); }
 .zk-cmd i { font-style: normal; color: var(--red-hot); }
 .zk-cmd-copy { position: absolute; top: 8px; right: 8px; font-size: 12px; padding: 5px 12px; border: 1px solid var(--red); color: var(--red-hot); background: rgba(194, 59, 34, 0.08); letter-spacing: 2px; }
 .zk-cmd-copy:hover { background: rgba(194, 59, 34, 0.22); }
