@@ -80,15 +80,23 @@ router.post(
     let note = null;
     if (fresh.completed_stages === DEPLOY_STAGE_INDEX - 1) {
       const evidence = JSON.stringify({ deploy: 'auto', probe: result.probe, type }).slice(0, 4000);
-      db.prepare(
+      const upd = db.prepare(
         `UPDATE projects SET completed_stages = ${DEPLOY_STAGE_INDEX}, status = 'deployed',
             last_report_at = datetime('now','localtime'), updated_at = datetime('now','localtime')
           WHERE id = ? AND revoked = 0 AND archived = 0`
       ).run(project.id);
-      db.prepare(
-        'INSERT INTO reports (project_id, stage, ok, reject_code, message, ip, evidence) VALUES (?, ?, 1, NULL, ?, ?, ?)'
-      ).run(project.id, 'deployment', '自动部署成功（服务端探活通过）', req.ip || '', evidence);
-      stageReported = true;
+      if (upd.changes === 0) {
+        // 竞态：校验后被吊销/归档——不写「成功」审计，避免审计与真实进度不符
+        db.prepare(
+          'INSERT INTO reports (project_id, stage, ok, reject_code, message, ip) VALUES (?, ?, 0, ?, ?, ?)'
+        ).run(project.id, 'deployment', 'KEY_REVOKED', '自动部署完成但项目状态已变化（吊销/归档），未上报节点', req.ip || '');
+        note = '部署成功但项目状态已变化（可能被吊销/归档），未上报「上线部署」节点';
+      } else {
+        db.prepare(
+          'INSERT INTO reports (project_id, stage, ok, reject_code, message, ip, evidence) VALUES (?, ?, 1, NULL, ?, ?, ?)'
+        ).run(project.id, 'deployment', '自动部署成功（服务端探活通过）', req.ip || '', evidence);
+        stageReported = true;
+      }
     } else if (fresh.completed_stages < DEPLOY_STAGE_INDEX - 1) {
       note = `部署成功但未自动上报「上线部署」：流程尚未进行到该节点（当前 ${fresh.completed_stages}/8，部署为第 6 节点），请先按顺序完成前置节点`;
     } else {

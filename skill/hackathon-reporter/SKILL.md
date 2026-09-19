@@ -65,8 +65,8 @@ node report.js --next   → 循环，直到八个节点全部完成
 | 4 | `coding` | 代码开发 | 核心功能代码全部完成、可运行后 |
 | 5 | `testing` | 本地测试 | 自测通过（核心流程跑通、无明显 bug）后 |
 | 6 | `deployment` | 上线部署 | 优先执行 `--deploy`：自动打包上传、部署到预留端口、探活通过后**自动上报**；也可自行启动后手工 `--stage deployment`（服务端会探活校验） |
-| 7 | `acceptance` | 线上验收 | **执行 `--verify`，探活+接口测试+E2E 全部通过后自动上报**（不要手工上报此节点） |
-| 8 | `submission` | 最终提交 | **只能由用户本人执行 `--submit` 并在终端确认**——当前线上版本定格为最终参赛待评分作品；Agent 严禁代为确认 |
+| 7 | `acceptance` | 线上验收 | **执行 `--verify`，探活+接口测试+E2E 全部通过后自动上报**；服务端会校验验证证据，手工 `--stage acceptance` 会被 409 `EVIDENCE_REQUIRED` 拒绝 |
+| 8 | `submission` | 最终提交 | **只能由用户本人执行 `--submit` 并在终端确认**——当前线上版本定格为最终参赛待评分作品；`--stage submission` 会被 CLI 直接拒绝，无确认证据的裸 API 上报会被服务端 409 `EVIDENCE_REQUIRED` 拒绝（`--yes` 跳过确认时证据会如实记为 `cli-non-interactive`） |
 
 ## 需求共创（requirements 节点的正确姿势）
 

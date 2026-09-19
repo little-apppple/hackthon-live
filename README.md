@@ -235,7 +235,7 @@ ADMIN_PASSWORD=赛事密码 PUBLIC_HOST=192.168.1.100 EVENT_END_TIME=2026-09-05T
 
 `POST /api/admin/login` · `GET/POST/PUT/DELETE /api/admin/events` · `POST /api/admin/events/:id/activate` · `GET/POST/PUT/DELETE /api/admin/departments|groups（?eventId=）` · `POST /api/admin/import/csv（?eventId=）` · `GET/POST /api/admin/projects（?eventId=）` · `POST /api/admin/projects/:id/revoke|restore|archive` · `DELETE /api/admin/projects/:id（彻底删除已归档）` · `POST /api/admin/projects/:id/rebind-client（解绑客户端标识）` · `GET/POST /api/admin/register-token（本期注册令牌签发/轮换）` · `GET /api/admin/ports` · `GET /api/admin/deploys` · `POST /api/admin/deploys/:id/start|stop|restart` · `GET /api/admin/meta`
 
-上报错误码：`INVALID_KEY`(404) / `KEY_REVOKED`(403) / `RATE_LIMITED`(429) / `INVALID_STAGE`(400) / `STAGE_OUT_OF_ORDER`·`STAGE_ALREADY_DONE`(409)；loop 错误码：`LOOP_NOT_ALLOWED`(409)。上报可携带 `evidence` 对象；「上线部署」上报时服务端会主动探测项目端口并记录探活结果。
+上报错误码：`INVALID_KEY`(404) / `KEY_REVOKED`(403) / `RATE_LIMITED`(429) / `INVALID_STAGE`(400) / `STAGE_OUT_OF_ORDER`·`STAGE_ALREADY_DONE`(409) / `EVIDENCE_REQUIRED`(409，验收须带验证证据、提交须带用户确认证据，机械门禁拒绝手工申报)；loop 错误码：`LOOP_NOT_ALLOWED`(409)。上报可携带 `evidence` 对象；「上线部署」上报时服务端会主动探测项目端口并记录探活结果。
 
 ## 自动部署
 

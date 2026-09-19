@@ -90,6 +90,29 @@ router.post('/report', aw(async (req, res) => {
     });
   }
 
+  // 机械门禁（先于限频，被拒不消耗窗口）：
+  // 第 7 节点必须由 --verify 自动上报（附探活/接口/E2E 证据），第 8 节点必须由用户本人 --submit（附确认证据）——
+  // 把「不靠自我申报 / 用户终审」从文档建议变成服务端断言；裸 API / --stage 手工上报会被拒。
+  const evidence = {};
+  if (req.body?.evidence && typeof req.body.evidence === 'object' && !Array.isArray(req.body.evidence)) {
+    Object.assign(evidence, req.body.evidence);
+  }
+  if (st.id === 'acceptance' && !(evidence.verify || evidence.checks)) {
+    audit(project.id, st.id, 0, 'EVIDENCE_REQUIRED', msg, ip);
+    return res.status(409).json({
+      ok: false,
+      code: 'EVIDENCE_REQUIRED',
+      error: '「线上验收」必须由 --verify 自动上报（附探活/接口/E2E 证据），不接受手工申报。请执行：node report.js --verify',
+    });
+  }
+  if (st.id === 'submission' && !(typeof evidence.confirmedVia === 'string' && evidence.confirmedVia.trim())) {
+    audit(project.id, st.id, 0, 'EVIDENCE_REQUIRED', msg, ip);
+    return res.status(409).json({
+      ok: false,
+      code: 'EVIDENCE_REQUIRED',
+      error: '「最终提交」必须由参赛用户本人执行 --submit 确认后上报（不得用 --stage/裸 API 代为提交）',
+    });
+  }
   // 限频放在全部校验之后：被拒请求不消耗窗口，409 自愈可立即重报正确的节点
   const now = Date.now();
   const last = lastAttemptAt.get(project.id) || 0;
@@ -106,17 +129,12 @@ router.post('/report', aw(async (req, res) => {
   }
   lastAttemptAt.set(project.id, now);
 
-  // 证据链：客户端证据（探活/接口/E2E 结果等）+ 服务端对部署节点的端口探活
-  let evidence = null;
-  if (req.body?.evidence && typeof req.body.evidence === 'object' && !Array.isArray(req.body.evidence)) {
-    evidence = { ...req.body.evidence };
-  }
   let deployProbe = null;
   if (st.index === DEPLOY_STAGE_INDEX) {
     deployProbe = await probeLocalPort(project.port);
-    evidence = { ...(evidence || {}), serverProbe: deployProbe };
+    evidence.serverProbe = deployProbe;
   }
-  const evidenceJson = evidence ? JSON.stringify(evidence).slice(0, 4000) : null;
+  const evidenceJson = Object.keys(evidence).length ? JSON.stringify(evidence).slice(0, 4000) : null;
 
   // 通过全部校验：推进节点（带守卫：校验后到写入前可能被吊销/归档/loop）
   const newStatus = deriveStatus(st.index, true);

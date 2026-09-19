@@ -272,6 +272,15 @@ async function main() {
     process.exit(2);
   }
 
+  // 第 8 节点不允许经 --stage 手工上报：必须走 --submit（用户本人交互确认或显式 --yes），
+  // 服务端同样校验确认证据——把「用户终审」从文档建议变成客户端+服务端双重断言
+  const stageRef = String(args.stage).trim().toLowerCase();
+  if (stageRef === 'submission' || stageRef === '8') {
+    console.error('✗ 「最终提交」不能用 --stage 上报。');
+    console.error('  请让参赛用户本人执行：node report.js --submit（终端确认后上报）');
+    process.exit(2);
+  }
+
   const payload = JSON.stringify({ accessKey: cfg.accessKey, stage: args.stage, message: args.message || '' });
   const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload };
 
@@ -991,19 +1000,38 @@ async function cmdScore(args, cfg) {
     console.log('（--dry：仅本地计算，未上报）');
     return;
   }
+  const soft = !!args.softScore; // 由 --submit 内部调用时软失败：不改变提交成功的结果
+  const fail = (msg) => {
+    if (soft) {
+      console.warn(`⚠ AI 参考评分上报未完成：${msg}（最终提交已成功，可稍后单独执行 --score 重算）`);
+      return;
+    }
+    console.error(msg);
+    process.exit(1);
+  };
   try {
-    const { status, body } = await callApiWithRetry(cfg, '/api/score', {
+    let { status, body } = await callApiWithRetry(cfg, '/api/score', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeader(cfg) },
       body: JSON.stringify({ accessKey: cfg.accessKey, score: ev.autoTotal, detail: ev }),
     });
+    if (status === 429 && body?.retryAfterSeconds) {
+      const wait = Math.min(body.retryAfterSeconds, 15);
+      console.log(`⏳ 上报过于频繁，${wait} 秒后自动重试…`);
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      ({ status, body } = await callApiWithRetry(cfg, '/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader(cfg) },
+        body: JSON.stringify({ accessKey: cfg.accessKey, score: ev.autoTotal, detail: ev }),
+      }));
+    }
     if (status === 200 && body?.ok) {
       console.log(`✓ AI 参考分已上报（${body.score}/85，主观项待评委评审）`);
       return;
     }
-    printApiError(status, body);
+    fail(`上报失败 [${body?.code || `HTTP ${status}`}]：${body?.error || ''}`);
   } catch {
-    networkError();
+    fail('网络错误：无法连接赛事服务端');
   }
 }
 
@@ -1099,11 +1127,14 @@ async function cmdSubmit(args, cfg) {
     console.log('已取消，未提交。');
     return;
   }
+  if (args.yes) {
+    console.log('⚠ 已用 --yes 跳过交互确认：请确保参赛用户本人已明确同意提交（确认证据会如实记录为 cli-non-interactive）。');
+  }
   const payload = JSON.stringify({
     accessKey: cfg.accessKey,
     stage: 'submission',
     message: args.message || '用户确认最终提交',
-    evidence: { confirmedVia: 'cli-interactive' },
+    evidence: { confirmedVia: args.yes ? 'cli-non-interactive' : 'cli-interactive' },
   });
   try {
     let { status, body } = await callApiWithRetry(cfg, '/api/report', {
@@ -1126,7 +1157,8 @@ async function cmdSubmit(args, cfg) {
       // 提交后自动跑一次 AI 参考评分并上报（--no-score 可跳过）
       if (!args.noScore) {
         console.log('');
-        await cmdScore({ ...args, submitFlow: true }, cfg);
+        // 软失败：提交已完成，评分上报失败只警告、不改变 --submit 的退出码
+        await cmdScore({ ...args, softScore: true }, cfg);
       } else {
         console.log('  （已按 --no-score 跳过 AI 参考评分）');
       }

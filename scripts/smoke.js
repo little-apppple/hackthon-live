@@ -151,7 +151,15 @@ async function api(method, path, body, useAuth = true) {
       .find((p) => p.id === created[0].id);
     check('状态变为 deployed', mine.status === 'deployed');
     await new Promise((r) => setTimeout(r, 10000)); // 避开限频窗口
-    const done = await api('POST', '/api/report', { accessKey: key1, stage: 'acceptance' }, false);
+    // 机械门禁：无验证证据的手工验收上报应被拒（且不消耗限频窗口）
+    const noEv = await api('POST', '/api/report', { accessKey: key1, stage: 'acceptance' }, false);
+    check('手工上报验收（无验证证据）被拒 409', noEv.status === 409 && noEv.data.code === 'EVIDENCE_REQUIRED', JSON.stringify(noEv.data));
+    const done = await api(
+      'POST',
+      '/api/report',
+      { accessKey: key1, stage: 'acceptance', evidence: { verify: { liveness: { ok: true } }, deployUrl: 'http://localhost' } },
+      false
+    );
     check('线上验收完成 90%（加权进度 7/8）', done.data.ok && done.data.progress === 90, `实际 ${done.data?.progress}`);
     check('KPI 完成率与项目加权进度同源', (() => { const k = done.data; return typeof k.progress === 'number'; })());
     check('下一节点指向最终提交', done.data.nextStage?.id === 'submission');
@@ -437,16 +445,20 @@ async function api(method, path, body, useAuth = true) {
     const reReq = await api('POST', '/api/report', { accessKey: key1, stage: 'requirements' }, false);
     check('第二轮重新上报需求成功', reReq.data.ok && reReq.data.progress === 5);
 
-    // 走完 2-7 节点（限频间隔 10s）
+    // 走完 2-7 节点（限频间隔 10s）；acceptance 需携带验证证据（机械门禁）
     for (const stage of ['design', 'prototype', 'coding', 'testing', 'deployment', 'acceptance']) {
       await new Promise((r) => setTimeout(r, 10000));
-      const r = await api('POST', '/api/report', { accessKey: key1, stage }, false);
+      const body = { accessKey: key1, stage };
+      if (stage === 'acceptance') body.evidence = { verify: { liveness: { ok: true } }, deployUrl: 'http://localhost' };
+      const r = await api('POST', '/api/report', body, false);
       check(`第二轮上报 ${stage} 成功`, r.data.ok, JSON.stringify(r.data));
     }
 
-    // 最终提交：8/8，状态 submitted
+    // 最终提交：必须携带用户确认证据（无证据先被拒，再合规上报）
     await new Promise((r) => setTimeout(r, 10000));
-    const sub = await api('POST', '/api/report', { accessKey: key1, stage: 'submission' }, false);
+    const subNoEv = await api('POST', '/api/report', { accessKey: key1, stage: 'submission' }, false);
+    check('无确认证据的提交被拒 409', subNoEv.status === 409 && subNoEv.data.code === 'EVIDENCE_REQUIRED', JSON.stringify(subNoEv.data));
+    const sub = await api('POST', '/api/report', { accessKey: key1, stage: 'submission', evidence: { confirmedVia: 'cli-interactive' } }, false);
     check('最终提交成功 100%', sub.data.ok && sub.data.progress === 100, JSON.stringify(sub.data));
     const snapSub = await api('GET', '/api/snapshot', undefined, false);
     const mineSub = snapSub.data.snapshot.departments
