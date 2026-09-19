@@ -35,7 +35,7 @@ function runCli(args, cwd) {
 }
 
 async function reportStage(configFile, stage) {
-  return runCli(['--config', configFile, '--stage', stage, '--message', 'verify-e2e'], TMP);
+  return runCli(['--config', configFile, '--stage', stage, ...(stage === 'requirements' ? ['--prd-confirmed'] : []), '--message', 'verify-e2e'], TMP);
 }
 
 (async () => {

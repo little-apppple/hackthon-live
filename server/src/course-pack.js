@@ -96,8 +96,14 @@ function buildReadme(serverUrl, included) {
     steps.push('安装浏览器自动化 CLI：cd agent-browser && npm install -g .（要求 Node ≥ 24；装完 agent-browser --help 验证）；');
   }
   steps.push('比赛流程：node skill/hackathon-reporter/scripts/report.js --next 按引导推进八节点。');
+  const notes = [
+    'CodeBuddy 用户建议从插件市场安装官方 superpowers 插件（自带会话注入，技能会自动唤起）；装了就不要再拷贝本包 superpowers/ 目录，避免双版本；',
+    '报名与「正式需求分析」是两回事：报名后先做需求共创（需求模板由用户亲笔填写、一次一问补盲、docs/prd.md 经用户确认），完成前无法上报 requirements 节点。',
+  ];
   lines.push('', '安装步骤：');
   steps.forEach((s, i) => lines.push(`  ${i + 1}. ${s}`));
+  lines.push('', '注意：');
+  notes.forEach((s) => lines.push(`  · ${s}`));
   return lines.join('\n');
 }
 

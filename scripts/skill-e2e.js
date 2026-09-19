@@ -201,7 +201,7 @@ function writeFixture() {
     check('--status 显示轮次与进度', (await runSkill(['--status'])).out.includes('LOOP ×1'));
 
     for (const st of ['requirements', 'design', 'prototype', 'coding', 'testing']) {
-      const r = await runSkill(['--stage', st, '--message', 'skill-e2e']);
+      const r = await runSkill(['--stage', st, ...(st === 'requirements' ? ['--prd-confirmed'] : []), '--message', 'skill-e2e']);
       check(`上报 ${st}`, r.code === 0 && /已记录|进度/.test(r.out), r.out.slice(-160));
       if (st === 'coding') {
         const nextTesting = await runSkill(['--next']);
@@ -250,7 +250,7 @@ function writeFixture() {
     // ── 9. 第二轮走完并最终提交 ──
     console.log('\n-- 第二轮 + 最终提交 --');
     for (const st of ['requirements', 'design', 'prototype', 'coding', 'testing']) {
-      await runSkill(['--stage', st, '--message', 'skill-e2e round2']);
+      await runSkill(['--stage', st, ...(st === 'requirements' ? ['--prd-confirmed'] : []), '--message', 'skill-e2e round2']);
     }
     const dep2 = await runSkill(['--deploy']);
     check('第二轮 --deploy 成功', dep2.code === 0, dep2.out.slice(-200));

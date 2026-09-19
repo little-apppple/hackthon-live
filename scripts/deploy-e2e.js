@@ -145,7 +145,7 @@ async function tryFetch(url) {
     // proj1：先走完 1-5 节点，再部署 → 自动上报部署节点
     console.log('\n-- node 应用：上传部署 + 自动上报 --');
     for (const st of ['requirements', 'design', 'prototype', 'coding', 'testing']) {
-      const code = await runCli(['--config', 'config1.json', '--stage', st, '--message', 'deploy-e2e'], TMP);
+      const code = await runCli(['--config', 'config1.json', '--stage', st, ...(st === 'requirements' ? ['--prd-confirmed'] : []), '--message', 'deploy-e2e'], TMP);
       check(`上报 ${st}`, code === 0);
     }
     const d1 = await runCli(['--config', 'config1.json', '--deploy'], TMP);
@@ -200,7 +200,7 @@ async function tryFetch(url) {
       JSON.stringify({ serverUrl: BASE, accessKey: projPkg.accessKey, deploy: { type: 'package', file: pkgName } }, null, 2)
     );
     for (const st of ['requirements', 'design', 'prototype', 'coding', 'testing']) {
-      const code = await runCli(['--stage', st, '--message', 'deploy-e2e-pkg'], pkgDir);
+      const code = await runCli(['--stage', st, ...(st === 'requirements' ? ['--prd-confirmed'] : []), '--message', 'deploy-e2e-pkg'], pkgDir);
       check(`安装包项目上报 ${st}`, code === 0);
     }
     const dPkg = await runCli(['--deploy', '--type', 'package', '--file', pkgName], pkgDir);
@@ -244,7 +244,7 @@ async function tryFetch(url) {
       JSON.stringify({ serverUrl: BASE, accessKey: projWeird.accessKey, deploy: { type: 'package', file: weirdLocal } }, null, 2)
     );
     for (const st of ['requirements', 'design', 'prototype', 'coding', 'testing']) {
-      await runCli(['--stage', st, '--message', 'deploy-e2e-weird'], weirdDir);
+      await runCli(['--stage', st, ...(st === 'requirements' ? ['--prd-confirmed'] : []), '--message', 'deploy-e2e-weird'], weirdDir);
     }
     const dWeird = await runCli(['--deploy', '--type', 'package', '--file', weirdLocal], weirdDir);
     check('含特殊字符的安装包名可发布', dWeird === 0);

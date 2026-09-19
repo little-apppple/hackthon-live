@@ -7,7 +7,12 @@ const { execSync } = require('child_process');
 const BASE = 'http://47.108.217.153:50000';
 const CLI = path.join(__dirname, '..', 'skill', 'hackathon-reporter', 'scripts', 'report.js');
 const WORK = path.join(__dirname, '..', 'tmp-multistack');
-  const ADMIN_PW = 'pAT-x1Ndnk-h';
+  // 旧实例管理密码不入库：从环境变量读取（该密码曾以明文存在于本文件历史中，建议尽快在旧实例上轮换）
+  const ADMIN_PW = process.env.ADMIN_PW_50000 || '';
+  if (!ADMIN_PW) {
+    console.error('缺少 ADMIN_PW_50000（旧实例 https://47.108.217.153:50000 的管理密码）：ADMIN_PW_50000=xxx node scripts/multistack-e2e.js');
+    process.exit(2);
+  }
 
 let passed = 0;
 let failed = 0;
@@ -142,7 +147,7 @@ public class Main {
   for (const st of stages) {
     for (const port of ports) {
       const c = cfgOf[port];
-      const r = await runCli(['--stage', st, '--message', 'multistack'], c.dir);
+      const r = await runCli(['--stage', st, ...(st === 'requirements' ? ['--prd-confirmed'] : []), '--message', 'multistack'], c.dir);
       check(`上报 ${st}（端口 ${port}）`, r.code === 0, r.out.slice(-120));
     }
   }

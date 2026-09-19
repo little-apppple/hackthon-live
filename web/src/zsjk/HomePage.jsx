@@ -147,7 +147,7 @@ const INIT_PROMPT =
   '请在项目级安装此压缩包里的 4 个 skill（hackathon-reporter、vibecoding-workflow、superpowers、agent-browser），' +
   '安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、一句话需求（大屏展示用，40 字内；这只是给评委看的简介，' +
   '正式需求分析稍后单独进行、不在这里收集）、参与人员（人员维度大屏用，建议列全）、可选的价值/功能/场景；小组未单独提供时用项目名代替。' +
-  '收集后带参执行（非交互终端必须带参，缺省项可省略）：node skill/hackathon-reporter/scripts/report.js --init --department <岛院名> --group <队伍名> --project <项目名> --summary "<一句话需求>" --members "<成员列表>"。';
+  '报名成功后不要直接开工：先做需求共创——用 brainstorming（或 skill/vibecoding-workflow 的需求共创流程）逐步澄清，把需求模板发我亲笔填写、一次一问补盲，产出 docs/prd.md 经我确认；未完成前不得上报 requirements 节点。收集后带参执行（非交互终端必须带参，缺省项可省略）：node skill/hackathon-reporter/scripts/report.js --init --department <岛院名> --group <队伍名> --project <项目名> --summary "<一句话需求>" --members "<成员列表>"。';
 
 function JoinCard() {
   const [copied, setCopied] = React.useState(false);
@@ -185,7 +185,7 @@ function JoinCard() {
         </span>
       </div>
       <div className="zk-cmd">
-        请在项目级安装此压缩包里的 4 个 skill（hackathon-reporter、vibecoding-workflow、superpowers、agent-browser），安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、一句话需求（大屏展示用，40 字内；这只是给评委看的简介，正式需求分析稍后单独进行、不在这里收集）、参与人员（人员维度大屏用，建议列全）、可选的价值/功能/场景；小组未单独提供时用项目名代替。收集后带参执行（非交互终端必须带参，缺省项可省略）：node skill/hackathon-reporter/scripts/report.js --init --department &lt;岛院名&gt; --group &lt;队伍名&gt; --project &lt;项目名&gt; --summary "&lt;一句话需求&gt;" --members "&lt;成员列表&gt;"。
+        请在项目级安装此压缩包里的 4 个 skill（hackathon-reporter、vibecoding-workflow、superpowers、agent-browser），安装完成后引导我完成参赛报名：依次向我询问 岛院名、项目名、一句话需求（大屏展示用，40 字内；这只是给评委看的简介，正式需求分析稍后单独进行、不在这里收集）、参与人员（人员维度大屏用，建议列全）、可选的价值/功能/场景；小组未单独提供时用项目名代替。报名成功后不要直接开工：先做需求共创——用 brainstorming（或 skill/vibecoding-workflow 的需求共创流程）逐步澄清，把需求模板发我亲笔填写、一次一问补盲，产出 docs/prd.md 经我确认；未完成前不得上报 requirements 节点。收集后带参执行（非交互终端必须带参，缺省项可省略）：node skill/hackathon-reporter/scripts/report.js --init --department &lt;岛院名&gt; --group &lt;队伍名&gt; --project &lt;项目名&gt; --summary "&lt;一句话需求&gt;" --members "&lt;成员列表&gt;"。
         <button className={`zk-cmd-copy ${copied ? 'ok' : ''}`} onClick={copy} title="复制提示词">
           {copied ? '已复制 ✓' : '复制'}
         </button>

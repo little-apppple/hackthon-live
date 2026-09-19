@@ -91,11 +91,22 @@ router.post('/report', aw(async (req, res) => {
   }
 
   // 机械门禁（先于限频，被拒不消耗窗口）：
-  // 第 7 节点必须由 --verify 自动上报（附探活/接口/E2E 证据），第 8 节点必须由用户本人 --submit（附确认证据）——
-  // 把「不靠自我申报 / 用户终审」从文档建议变成服务端断言；裸 API / --stage 手工上报会被拒。
+  // 第 1 节点必须携带需求共创确认证据（模板由用户亲笔填写、PRD 经用户确认）；
+  // 第 7 节点必须由 --verify 自动上报（附探活/接口/E2E 证据）；第 8 节点必须由用户本人 --submit（附确认证据）——
+  // 把「用户参与是硬要求 / 不靠自我申报 / 用户终审」从文档建议变成服务端断言；裸 API / --stage 手工上报会被拒。
   const evidence = {};
   if (req.body?.evidence && typeof req.body.evidence === 'object' && !Array.isArray(req.body.evidence)) {
     Object.assign(evidence, req.body.evidence);
+  }
+  if (st.id === 'requirements' && evidence.prdConfirmed !== true) {
+    audit(project.id, st.id, 0, 'EVIDENCE_REQUIRED', msg, ip);
+    return res.status(409).json({
+      ok: false,
+      code: 'EVIDENCE_REQUIRED',
+      error:
+        '「需求分析」必须携带需求共创确认证据：先与用户完成需求共创（需求模板由用户亲笔填写、逐条追问补盲、docs/prd.md 经用户确认），' +
+        '再执行 node report.js --stage requirements（CLI 会校验产物并请用户确认；非交互环境加 --prd-confirmed）',
+    });
   }
   if (st.id === 'acceptance' && !(evidence.verify || evidence.checks)) {
     audit(project.id, st.id, 0, 'EVIDENCE_REQUIRED', msg, ip);

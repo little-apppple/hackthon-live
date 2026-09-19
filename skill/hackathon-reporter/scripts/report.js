@@ -22,6 +22,7 @@ const genClientId = () => 'cli_' + crypto.randomBytes(16).toString('hex');
 const USAGE = `用法:
   node report.js --init [--server-url <地址> --access-key <密钥>] [--deploy-url <地址>] [--force]     # 手工模式
   node report.js --init [--department <部门> --group <小组> --project <项目名>] [--summary <一句话需求>]  # 自助注册模式（技能包内置上报地址时自动启用）
+  node report.js --stage requirements [--prd-confirmed]   # 需求分析上报（需共创产物+用户确认；非交互环境用 --prd-confirmed 声明）
   node report.js --next [--config <路径>]
   node report.js --stage <节点标识|序号> [--message "说明"] [--config <路径>]
   node report.js --status [--config <路径>]
@@ -150,6 +151,7 @@ function parseArgs(argv) {
     else if (a === '--doctor') args.doctor = true;
     else if (a === '--score') args.score = true;
     else if (a === '--no-score') args.noScore = true;
+    else if (a === '--prd-confirmed') args.prdConfirmed = true;
     else if (a === '--force') args.force = true;
     else if (a === '--verify') args.verify = true;
     else if (a === '--deploy') args.deploy = true;
@@ -281,7 +283,43 @@ async function main() {
     process.exit(2);
   }
 
-  const payload = JSON.stringify({ accessKey: cfg.accessKey, stage: args.stage, message: args.message || '' });
+  // 第 1 节点机械门禁（客户端侧）：需求共创产物 + 用户确认，缺一不可——
+  // 服务端同样要求 evidence.prdConfirmed，防止把「需求澄清」跳过去直接刷进度
+  let reqEvidence;
+  if (stageRef === 'requirements' || stageRef === '1') {
+    const artifacts = ['docs/requirements-template.md', 'docs/prd.md'].filter((f) => fs.existsSync(path.resolve(process.cwd(), f)));
+    const missing = ['docs/requirements-template.md', 'docs/prd.md'].filter((f) => !artifacts.includes(f));
+    if (missing.length) {
+      console.warn(`⚠ 未找到需求共创产物：${missing.join('、')}（模板应由用户亲笔填写，PRD 须闭环且经用户确认）`);
+      console.warn('  产物缺失不影响上报，但 AI 参考评分会按「证据缺失」扣分；建议先完成共创：用户填模板 → 一次一问补盲 → PRD 获批。');
+    }
+    if (!args.prdConfirmed) {
+      // 非交互环境：不能静默跳过用户确认——明确报错并给出两种合规路径
+      if (!process.stdin.isTTY) {
+        console.error('✗ 「需求分析」上报需要用户确认的共创证据。');
+        console.error('  合规路径：① 让参赛用户本人执行本命令并在终端确认；');
+        console.error('            ② 用户已在别处确认过时，加 --prd-confirmed 显式声明（会记入证据：prdConfirmed=true）。');
+        process.exit(2);
+      }
+      const ok = await confirm('需求模板已由用户亲笔填写、docs/prd.md 已获用户确认？确认后上报需求分析节点 [y/N]: ');
+      if (!ok) {
+        console.log('已取消：请先完成需求共创（用户填模板 → 逐条追问 → PRD 获批）再上报。');
+        process.exit(0);
+      }
+    }
+    reqEvidence = {
+      prdConfirmed: true,
+      artifacts,
+      confirmedVia: args.prdConfirmed ? (args.prdConfirmedBy || 'cli-flag') : 'cli-interactive',
+    };
+  }
+
+  const payload = JSON.stringify({
+    accessKey: cfg.accessKey,
+    stage: args.stage,
+    message: args.message || '',
+    ...(reqEvidence ? { evidence: reqEvidence } : {}),
+  });
   const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload };
 
   try {

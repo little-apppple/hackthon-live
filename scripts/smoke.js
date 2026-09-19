@@ -106,8 +106,10 @@ async function api(method, path, body, useAuth = true) {
     const skip = await api('POST', '/api/report', { accessKey: key1, stage: 'coding' }, false);
     check('跳节点被拒 409', skip.status === 409 && skip.data.code === 'STAGE_OUT_OF_ORDER');
     check('提示应上报节点', skip.data.expectedStage?.id === 'requirements');
-    const ok1 = await api('POST', '/api/report', { accessKey: key1, stage: 1, message: '需求完成' }, false);
-    check('需求分析上报成功', ok1.data.ok && ok1.data.progress === 5);
+    const reqNoEv = await api('POST', '/api/report', { accessKey: key1, stage: 'requirements' }, false);
+    check('无共创证据的需求上报被拒 409', reqNoEv.status === 409 && reqNoEv.data.code === 'EVIDENCE_REQUIRED', JSON.stringify(reqNoEv.data));
+    const ok1 = await api('POST', '/api/report', { accessKey: key1, stage: 1, message: '需求完成', evidence: { prdConfirmed: true } }, false);
+    check('需求分析上报成功（携带共创证据）', ok1.data.ok && ok1.data.progress === 5);
     const dup = await api('POST', '/api/report', { accessKey: key1, stage: 'requirements' }, false);
     check('重复上报被拒 409', dup.status === 409 && dup.data.code === 'STAGE_ALREADY_DONE');
     const throttled = await api('POST', '/api/report', { accessKey: key1, stage: 'design' }, false);
@@ -442,7 +444,7 @@ async function api(method, path, body, useAuth = true) {
     const subEarly = await api('POST', '/api/report', { accessKey: key1, stage: 'submission' }, false);
     check('重置后直接提交被拒 409', subEarly.status === 409 && subEarly.data.code === 'STAGE_OUT_OF_ORDER');
     await new Promise((r) => setTimeout(r, 10000));
-    const reReq = await api('POST', '/api/report', { accessKey: key1, stage: 'requirements' }, false);
+    const reReq = await api('POST', '/api/report', { accessKey: key1, stage: 'requirements', evidence: { prdConfirmed: true } }, false);
     check('第二轮重新上报需求成功', reReq.data.ok && reReq.data.progress === 5);
 
     // 走完 2-7 节点（限频间隔 10s）；acceptance 需携带验证证据（机械门禁）

@@ -59,7 +59,7 @@ node report.js --next   → 循环，直到八个节点全部完成
 
 | 序号 | 标识 | 节点 | 何时上报 |
 |---|---|---|---|
-| 1 | `requirements` | 需求分析 | **用户确认的 PRD** 落盘 docs/prd.md 后（见下方「需求共创」） |
+| 1 | `requirements` | 需求分析 | **用户确认的 PRD** 落盘 docs/prd.md 后（见下方「需求共创」）；上报时 CLI 会校验共创产物并请用户确认（非交互环境加 `--prd-confirmed`），服务端要求 `evidence.prdConfirmed`，无证据的裸上报会被 409 `EVIDENCE_REQUIRED` 拒绝 |
 | 2 | `design` | 方案设计 | 架构与接口契约定稿后（技术选型固定：Node.js 全栈 + node:sqlite） |
 | 3 | `prototype` | 原型设计 | 页面/交互原型获得**用户确认**后（可选：用户给设计模板链接，按模板实现） |
 | 4 | `coding` | 代码开发 | 核心功能代码全部完成、可运行后 |
@@ -75,7 +75,7 @@ node report.js --next   → 循环，直到八个节点全部完成
 1. **先请用户亲笔描述需求**：项目开始前不要替用户编需求。按项目名做一次深度搜索（同类产品、常见实现、可参考的数据源/公开 API），基于搜索结果产出一个**需求描述模板**（目标用户/核心场景/输入输出/数据来源/展示形式）交给用户填写；
 2. **grill-me 式追问**：拿到用户填写的结果后，一次只问一个问题、每个问题附推荐答案，能从代码库/搜索找到答案的不问用户，直到需求无盲点；
 3. **PRD 闭环标准（不满足就不许上报 requirements）**：产出 `docs/prd.md`，其中每一条输入都有来源、每一条输出都有去向、每条用户流程都能真正跑通；**禁止假设**——不确定能否获取到的数据/接口，先写最小验证脚本跑通再落进 PRD；
-4. 上报：`node report.js --stage requirements --message "PRD 已获用户确认"`。
+4. 上报：`node report.js --stage requirements --message "PRD 已获用户确认"`——CLI 会检查 docs/requirements-template.md 与 docs/prd.md 是否存在并请用户交互确认；非交互环境（Agent 管道调用）必须加 `--prd-confirmed` 显式声明用户已确认（证据如实记为 cli-flag）。**该节点不接受任何无确认证据的上报**。
 
 ## 迭代与最终提交
 
