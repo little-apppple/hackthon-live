@@ -20,7 +20,7 @@ const STATUS_TEXT = {
 const AVATAR_TINTS = ['rgba(194,59,34,0.20)', 'rgba(194,59,34,0.10)', 'rgba(200,200,200,0.10)', 'rgba(232,90,58,0.16)', 'rgba(122,122,122,0.16)'];
 
 export default function PeoplePage() {
-  const { snapshot } = useSnapshot();
+  const { snapshot, connected } = useSnapshot();
   const [sort, setSort] = React.useState({ key: 'projectCount', dir: 'desc' });
   const [openName, setOpenName] = React.useState(null);
 
@@ -33,7 +33,7 @@ export default function PeoplePage() {
   };
 
   return (
-    <ZsjkShell snapshot={snapshot}>
+    <ZsjkShell snapshot={snapshot} connected={connected}>
       <div className="zk4-head">
         <div>
           <div className="zk4-h1">人员维度</div>

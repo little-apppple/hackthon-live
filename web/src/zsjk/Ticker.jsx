@@ -1,7 +1,7 @@
 import React from 'react';
 
-// 全局事件滚动条：[实时动态标签固定] + [视口 flex:1 两端 5% 渐隐]，内容匀速左移循环
-// running=false 时暂停（作战地图页受「实时同步」开关控制）
+// 全局事件滚动条：[实时动态标签固定] + [视口 flex:1 两端 5% 渐隐] + [连接状态/管理入口]
+// running=false 时暂停（作战地图页受「实时同步」开关控制）；connected=false 时状态灯转灰并提示信号中断
 const STAGE_NAMES = {
   requirements: '需求分析', design: '方案设计', prototype: '原型设计', coding: '代码开发',
   testing: '本地测试', deployment: '上线部署', acceptance: '线上验收', submission: '最终提交',
@@ -18,7 +18,7 @@ function evText(e) {
   return e.ok ? `${who} 完成「${STAGE_NAMES[e.stage] || e.stage}」` : `${who} 上报被拒（${e.reject_code}）`;
 }
 
-export default function Ticker({ events, running = true }) {
+export default function Ticker({ events, running = true, connected = true }) {
   // 快照事件按 id 倒序（最新在前），滚动轨道按时间序播放；复制一份实现无缝循环
   const items = (events || []).slice(0, 30).reverse();
   const seq = items.length > 0 ? [...items, ...items] : [];
@@ -42,6 +42,13 @@ export default function Ticker({ events, running = true }) {
           ))}
         </div>
       </div>
+      <span className="zk-ticker-status" title={connected ? '实时连接正常' : '连接中断，自动重连中'}>
+        <i className="zk-live-dot" data-on={connected} />
+        <span className={`zk-live-text ${connected ? '' : 'off'}`}>{connected ? 'LIVE' : '信号中断'}</span>
+        <a className="zk-admin-link" href="/admin" target="_blank" rel="noreferrer">
+          管理后台
+        </a>
+      </span>
     </div>
   );
 }

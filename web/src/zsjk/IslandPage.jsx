@@ -9,7 +9,7 @@ import { aggregateIslands, orderIslands, splitMembers } from './model.js';
 // 入口 /zsjk/island?unit=<deptId>；非法参数回退全部；行点击开 ProjectDetail 弹窗
 
 export default function IslandPage() {
-  const { snapshot } = useSnapshot();
+  const { snapshot, connected } = useSnapshot();
   const [params, setParams] = useSearchParams();
   const [detail, setDetail] = React.useState(null);
 
@@ -32,7 +32,7 @@ export default function IslandPage() {
   };
 
   return (
-    <ZsjkShell snapshot={snapshot}>
+    <ZsjkShell snapshot={snapshot} connected={connected}>
       <div className="zk3-top">
         <Link className="zk3-back" to="/zsjk/map">
           ← 返回作战地图
@@ -85,12 +85,20 @@ export default function IslandPage() {
               {island.projects.map((p) => (
                 <div className="zk3-row" key={p.id} onClick={() => setDetail(p)} title="点击查看项目详情">
                   <div className="zk3-name">
-                    <b title={p.name}>{p.name}</b>
+                    <b title={p.name}>
+                      <span className="zk3-name-text">{p.name}</span>
+                      {isPlayable(p) && (
+                        <span className="zk3-playable" title="已上线，评委可直接点开体验">
+                          可体验
+                        </span>
+                      )}
+                    </b>
                     <span>
                       P-{String(p.id).padStart(3, '0')}
                       {(p.loop_count || 1) > 1 ? ` · LOOP×${p.loop_count}` : ''}
                       {p.revoked ? ' · 已吊销' : ''}
                     </span>
+                    <StatusLine project={p} stages={stages} serverTime={snapshot.serverTime} />
                   </div>
                   <StageNodes project={p} stages={stages} />
                   <div className="zk3-desc">
@@ -123,6 +131,52 @@ export default function IslandPage() {
       <ProjectDetail project={detail} stages={stages} onClose={() => setDetail(null)} />
     </ZsjkShell>
   );
+}
+
+// 可体验：已上线且有可达目标（Web 链接或安装包），吊销除外——与旧屏 ProjectCard 口径一致
+function isPlayable(p) {
+  return !p.revoked && p.completed_stages >= 6 && !!(p.link || p.artifactUrl);
+}
+
+// 分钟差（以服务端时间为基准，避免终端时钟偏差）；解析失败返回 null
+function minutesSince(iso, serverIso) {
+  if (!iso) return null;
+  const t = new Date(String(iso).replace(' ', 'T')).getTime();
+  const base = serverIso ? new Date(serverIso).getTime() : Date.now();
+  if (!Number.isFinite(t) || !Number.isFinite(base)) return null;
+  return Math.max(0, Math.round((base - t) / 60000));
+}
+
+function fmtMin(m) {
+  return m >= 60 ? `${Math.floor(m / 60)}h${m % 60}m` : `${m}m`;
+}
+
+// 行内状态信号：与旧屏 ProjectCard 文案同口径（停滞 ≥30 分钟标红提示，活跃显示最近活动时间）
+function StatusLine({ project, stages, serverTime }) {
+  const names = stages || [];
+  const cur = names[project.completed_stages] || null;
+  let text;
+  let stalled = false;
+  if (project.revoked) {
+    text = '上报已被禁用';
+  } else if (project.status === 'loading') {
+    text = '等待小组首次上报';
+  } else if (project.status === 'submitted') {
+    text = '已定格为评分版本';
+  } else if (project.status === 'done') {
+    text = '线上验收通过 · 待最终提交';
+  } else {
+    const stalledMin = minutesSince(project.stageStartedAt, serverTime);
+    const seenMin = minutesSince(project.lastSeenAt, serverTime);
+    const seenTxt = seenMin !== null && seenMin >= 15 ? `（最近活动 ${fmtMin(seenMin)}前）` : '';
+    if (stalledMin !== null && stalledMin >= 30) {
+      stalled = true;
+      text = `停滞中：${cur ? cur.name : '—'} · 已 ${fmtMin(stalledMin)}未上报`;
+    } else {
+      text = `当前节点：${cur ? `${cur.name}${cur.audience ? ` · ${cur.audience}` : ''}` : '—'}${seenTxt}`;
+    }
+  }
+  return <span className={`zk3-status ${stalled ? 'stalled' : ''}`}>{text}</span>;
 }
 
 // 8 节点 dot 条：done/doing/todo 三态 + 自报空心环 / 服务端验证实心微光 + 安装包原型跳过

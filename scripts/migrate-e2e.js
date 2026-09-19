@@ -5,13 +5,26 @@
 //      → 断言迁移后 /api/snapshot 与 /api/admin/projects 可用（列齐全、数据保留）
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
+const net = require('net');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const TMP = path.join(ROOT, 'tmp-migrate');
-const PORT = 3600;
-const BASE = `http://localhost:${PORT}`;
 const ADMIN_PW = 'test123';
+
+// 端口不再硬编码：桌面应用（如微信小程序运行时）会随机 Bound 端口，固定 3600 会撞 EADDRINUSE。
+// 取系统当前空闲端口，仍失败（极小概率被抢占）则换下一个重试。
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const port = srv.address().port;
+      srv.close(() => resolve(port));
+    });
+  });
+}
 
 let passed = 0;
 let failed = 0;
@@ -55,21 +68,33 @@ console.log('legacy db built');
   buildLegacyDb(dbFile);
   check('已构造 legacy 库（departments 无 event_id、projects 含 hits/loop_count 数据）', fs.existsSync(dbFile));
 
-  const server = spawn(process.execPath, ['server/src/index.js'], {
-    cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), DB_PATH: dbFile, PUBLIC_HOST: 'localhost', ADMIN_PASSWORD: ADMIN_PW },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let log = '';
-  server.stdout.on('data', (d) => (log += d));
-  server.stderr.on('data', (d) => (log += d));
-
+  // 启动服务：取系统空闲端口；极小概率被抢先占用时换端口重试（最多 5 次）
+  let server;
+  let PORT = 0;
+  let BASE = '';
   let up = false;
-  for (let i = 0; i < 40 && !up; i++) {
-    try {
-      up = (await fetch(BASE + '/healthz')).ok;
-    } catch {
-      await sleep(250);
+  let log = '';
+  for (let attempt = 0; attempt < 5 && !up; attempt++) {
+    PORT = await freePort();
+    BASE = `http://localhost:${PORT}`;
+    server = spawn(process.execPath, ['server/src/index.js'], {
+      cwd: ROOT,
+      env: { ...process.env, PORT: String(PORT), DB_PATH: dbFile, PUBLIC_HOST: 'localhost', ADMIN_PASSWORD: ADMIN_PW },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    log = '';
+    server.stdout.on('data', (d) => (log += d));
+    server.stderr.on('data', (d) => (log += d));
+    for (let i = 0; i < 40 && !up; i++) {
+      try {
+        up = (await fetch(BASE + '/healthz')).ok;
+      } catch {
+        await sleep(250);
+      }
+    }
+    if (!up) {
+      server.kill();
+      await sleep(300);
     }
   }
   check('迁移后服务可启动', up, log.slice(-300));

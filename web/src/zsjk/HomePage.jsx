@@ -1,6 +1,8 @@
 import React from 'react';
 import ZsjkShell, { ZsjkBoot } from './ZsjkShell.jsx';
 import { useSnapshot } from '../useSnapshot.js';
+import SubmittedList from '../dashboard/SubmittedList.jsx';
+import ProjectDetail from '../dashboard/ProjectDetail.jsx';
 
 // 首页：banner(170) + video-row(420, mock) + bottom-row(310：讲师 mock + 3 天流程 mock + 参赛接入卡)
 // 预算 170+20+420+20+310+ticker76 = 1016
@@ -22,10 +24,11 @@ const FLOW = [
 ];
 
 export default function HomePage() {
-  const { snapshot } = useSnapshot();
+  const { snapshot, connected } = useSnapshot();
+  const [detail, setDetail] = React.useState(null);
   if (!snapshot) return <ZsjkBoot />;
   return (
-    <ZsjkShell snapshot={snapshot}>
+    <ZsjkShell snapshot={snapshot} connected={connected}>
       <div className="zk-banner">
         <div className="zk-banner-left">
           <h1 className="zk-h1">
@@ -37,9 +40,9 @@ export default function HomePage() {
           </p>
         </div>
         <div className="zk-metas">
-          <div className="zk-meta">
+          <div className="zk-meta is-wide">
             <span className="zk-meta-label">距结束</span>
-            <span className="zk-meta-value is-red">
+            <span className="zk-meta-value is-red is-count">
               <CountdownText endTime={snapshot.eventEndTime} />
             </span>
           </div>
@@ -48,6 +51,13 @@ export default function HomePage() {
             <span className="zk-meta-value">
               {snapshot.kpi.projects}
               <small>个</small>
+            </span>
+          </div>
+          <div className="zk-meta">
+            <span className="zk-meta-label">已上线</span>
+            <span className="zk-meta-value">
+              {snapshot.kpi.deployed}
+              <small>队</small>
             </span>
           </div>
           <div className="zk-meta">
@@ -118,7 +128,19 @@ export default function HomePage() {
           </div>
           <JoinCard />
         </div>
+
+        <div className="zk-card">
+          <div className="zk-card-title">
+            已提交作品
+            <span className="t-dim">{snapshot.submittedProjects.length} 队 · 定格评分版本</span>
+          </div>
+          <div className="zk-embed">
+            <SubmittedList items={snapshot.submittedProjects} onOpenDetail={setDetail} />
+          </div>
+        </div>
       </div>
+
+      <ProjectDetail project={detail} stages={snapshot.stages} onClose={() => setDetail(null)} />
     </ZsjkShell>
   );
 }
@@ -162,9 +184,7 @@ function JoinCard() {
           {copied ? '已复制 ✓' : '复制'}
         </button>
       </div>
-      <div className="zk-join-hint">
-        可追加 --members / --summary / --value / --features / --scenario 完善大屏展示信息；重复执行幂等，不会重复发号。
-      </div>
+      <div className="zk-join-hint">可追加 --members 等参数完善展示；重复执行幂等，不重复发号。</div>
     </>
   );
 }

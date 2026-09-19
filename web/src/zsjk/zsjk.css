@@ -24,6 +24,12 @@
 .zk-ticker-item.tk-reject b { color: var(--txt-dim); }
 .zk-ticker.is-paused .zk-ticker-track { animation-play-state: paused; }
 .zk-ticker-dim { color: var(--txt-faint); font-size: 14px; letter-spacing: 2px; }
+.zk-ticker-status { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; }
+.zk-live-dot[data-on='false'] { background: var(--txt-faint); box-shadow: none; animation: none; }
+.zk-live-text { font-size: 13px; letter-spacing: 2px; color: var(--red-hot); }
+.zk-live-text.off { color: var(--txt-bright); animation: pulse 1.2s ease infinite; }
+.zk-admin-link { font-size: 13px; color: var(--txt-dim); border: 1px solid var(--line); border-radius: 4px; padding: 4px 12px; letter-spacing: 1px; }
+.zk-admin-link:hover { color: var(--txt-bright); border-color: var(--red); }
 @keyframes zkMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
 /* ---------- navpill 迷你页导航（fixed 竖排贴左边缘，不占内容预算、不压 64px 内容区） ---------- */
@@ -44,12 +50,13 @@
 .zk-h1 { font-size: 50px; line-height: 1.1; color: var(--txt-bright); letter-spacing: 6px; text-shadow: 0 0 24px rgba(194, 59, 34, 0.35); }
 .zk-h1 em { font-style: normal; color: var(--red-hot); }
 .zk-banner-sub { color: var(--txt-dim); font-size: 16px; line-height: 1.55; max-width: 900px; }
-.zk-metas { flex: 0 0 36%; display: flex; gap: 14px; }
-.zk-meta { flex: 1 1 0; border: 1px solid var(--line); background: rgba(13, 13, 13, 0.82); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+.zk-metas { flex: 0 0 42%; display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 14px; }
+.zk-meta { border: 1px solid var(--line); background: rgba(13, 13, 13, 0.82); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-width: 0; }
 .zk-meta-label { font-size: 13px; color: var(--txt-dim); letter-spacing: 3px; }
-.zk-meta-value { font-size: 36px; color: var(--txt-bright); line-height: 1; }
+.zk-meta-value { font-size: 36px; color: var(--txt-bright); line-height: 1; white-space: nowrap; }
 .zk-meta-value small { font-size: 15px; color: var(--txt-dim); margin-left: 4px; }
 .zk-meta-value.is-red { color: var(--red-hot); text-shadow: var(--glow-red); }
+.zk-meta-value.is-count { font-size: 26px; letter-spacing: 1px; }
 
 .zk-videos { flex: 0 0 420px; margin-top: 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; min-height: 0; }
 .zk-video { border: 1px solid var(--line); background: rgba(13, 13, 13, 0.82); display: flex; flex-direction: column; min-height: 0; }
@@ -63,7 +70,7 @@
 .zk-vmeta b { font-size: 15px; color: var(--txt-bright); white-space: nowrap; }
 .zk-vmeta span { font-size: 13px; color: var(--txt-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.zk-bottom { flex: 1 1 0; min-height: 0; margin-top: 20px; display: grid; grid-template-columns: 440px 1fr 460px; gap: 20px; }
+.zk-bottom { flex: 1 1 0; min-height: 0; margin-top: 20px; display: grid; grid-template-columns: 380px 1fr 420px 400px; gap: 20px; }
 .zk-card { border: 1px solid var(--line); background: rgba(13, 13, 13, 0.82); padding: 14px 18px; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .zk-card-title { display: flex; align-items: center; gap: 10px; font-size: 16px; color: var(--txt-bright); letter-spacing: 3px; margin-bottom: 10px; flex: 0 0 auto; }
 .zk-card-title::before { content: ''; width: 4px; height: 15px; background: var(--red); box-shadow: var(--glow-red); }
@@ -84,7 +91,7 @@
 .zk-flow-title { font-size: 15px; color: var(--txt-bright); }
 .zk-flow-desc { font-size: 12.5px; color: var(--txt-dim); line-height: 1.55; }
 
-.zk-join-steps { display: flex; flex-direction: column; gap: 7px; font-size: 13.5px; color: var(--txt-dim); line-height: 1.5; }
+.zk-join-steps { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--txt-dim); line-height: 1.45; }
 .zk-join-steps b { color: var(--txt); font-weight: normal; }
 .zk-join-steps .st { color: var(--red-hot); margin-right: 6px; }
 .zk-cmd { position: relative; margin-top: 12px; background: #000; border: 1px solid var(--line); padding: 12px 92px 12px 14px; font-size: 14px; line-height: 1.6; color: var(--txt-bright); word-break: break-all; }
@@ -139,9 +146,13 @@
 .zk-island-hits { flex: 0 0 auto; margin-top: 11px; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--txt-dim); }
 .zk-island-hits b { margin-left: auto; font-size: 20px; color: var(--txt-bright); font-weight: normal; }
 
-.zk-charts { flex: 1 1 0; min-height: 0; margin-top: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.zk-charts { flex: 1 1 0; min-height: 0; margin-top: 24px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
 .zk-chart { border: 1px solid var(--line); background: rgba(13, 13, 13, 0.82); padding: 10px 14px 4px; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .zk-chart-body { flex: 1 1 0; min-height: 0; }
+/* 旧屏榜单组件嵌入 zk-card：去自身边框/标题，占满并内部滚动 */
+.zk-embed { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.zk-embed .panel-title { display: none; }
+.zk-embed .hot-panel, .zk-embed .submitted-panel { border: none; border-radius: 0; background: transparent; padding: 0 0 4px; flex: 1 1 0; min-height: 0; max-height: none; }
 
 /* ---------- 岛屿详情 ---------- */
 .zk3-top { flex: 0 0 88px; display: flex; align-items: center; gap: 16px; padding: 0 8px; }
@@ -164,8 +175,12 @@
 .zk3-row { display: grid; grid-template-columns: 300px 440px 1fr; gap: 32px; align-items: center; min-height: 94px; padding: 12px 22px; border-bottom: 1px solid var(--line-dim); cursor: pointer; }
 .zk3-row:hover { background: rgba(194, 59, 34, 0.05); }
 .zk3-name { min-width: 0; }
-.zk3-name b { display: block; font-size: 17px; color: var(--txt-bright); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.zk3-name span { font-size: 12px; color: var(--txt-faint); letter-spacing: 1px; }
+.zk3-name b { display: flex; align-items: center; gap: 8px; font-size: 17px; color: var(--txt-bright); min-width: 0; }
+.zk3-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zk3-name > span { display: block; font-size: 12px; color: var(--txt-faint); letter-spacing: 1px; }
+.zk3-playable { flex: 0 0 auto; font-size: 11px; color: var(--red-hot); border: 1px solid rgba(194, 59, 34, 0.6); background: rgba(194, 59, 34, 0.1); padding: 0 7px; letter-spacing: 1px; }
+.zk3-status { display: block; font-size: 12px; color: var(--txt-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zk3-status.stalled { color: var(--red-hot); }
 .zk3-nodes { display: flex; align-items: center; min-width: 0; }
 .zk3-pct { margin-left: auto; padding-left: 14px; font-size: 21px; color: var(--red-hot); flex: 0 0 auto; }
 .zk3-desc { min-width: 0; display: flex; flex-direction: column; gap: 5px; }

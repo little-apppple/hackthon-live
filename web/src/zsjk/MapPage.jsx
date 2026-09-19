@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import * as echarts from 'echarts';
 import ZsjkShell, { ZsjkBoot } from './ZsjkShell.jsx';
 import { useSnapshot } from '../useSnapshot.js';
+import HotList from '../dashboard/HotList.jsx';
 import { aggregateIslands, groupIslands } from './model.js';
 
 // 作战地图：标题(150) + 岛院卡 3 列(488) + 三图(254)，预算 150+24+488+24+254+ticker76 = 1016
@@ -11,7 +12,7 @@ import { aggregateIslands, groupIslands } from './model.js';
 const SYNC_KEY = 'zk-map-sync';
 
 export default function MapPage() {
-  const { snapshot } = useSnapshot();
+  const { snapshot, connected } = useSnapshot();
   const navigate = useNavigate();
   const [syncOn, setSyncOn] = React.useState(() => localStorage.getItem(SYNC_KEY) !== '0');
   React.useEffect(() => {
@@ -22,9 +23,10 @@ export default function MapPage() {
   const islands = aggregateIslands(snapshot.departments);
   const islandGroups = groupIslands(islands);
   const totalProjects = islands.reduce((s, i) => s + i.projectCount, 0);
+  const waiting = (snapshot.loadingProjects || []).length;
 
   return (
-    <ZsjkShell snapshot={snapshot} syncOn={syncOn} dimmable>
+    <ZsjkShell snapshot={snapshot} connected={connected} syncOn={syncOn} dimmable>
       <div className="zk-map-title">
         <button
           className="zk-sync"
@@ -42,7 +44,15 @@ export default function MapPage() {
           <span className="zk-rowline r" />
         </div>
         <div className="zk-map-sub">
-          <b>{islands.length}</b> 座岛院 · <b>{totalProjects}</b> 个立项 · 数据实时同步
+          <b>{islands.length}</b> 座岛院 · <b>{totalProjects}</b> 个立项 · 已上线{' '}
+          <b>{snapshot.kpi.deployed}</b> · 整体完成 <b>{snapshot.kpi.completion}%</b>
+          {waiting > 0 && (
+            <>
+              {' '}
+              · 等待启动 <b>{waiting}</b> 队
+            </>
+          )}{' '}
+          · 数据实时同步
         </div>
       </div>
 
@@ -101,7 +111,16 @@ export default function MapPage() {
           <IslandChart title="进度值（加权）" unit="%" islands={islands} field="progress" max={100} />
         </div>
         <div className="zk-chart">
-          <IslandChart title="实时人气值 · 按项目汇总" unit="" islands={islands} field="hits" red />
+          <IslandChart title="岛院人气值 · 按项目汇总" unit="" islands={islands} field="hits" red />
+        </div>
+        <div className="zk-chart">
+          <div className="zk-card-title">
+            项目人气榜 TOP5
+            <span className="t-dim">全场合计 {snapshot.kpi.totalHits}</span>
+          </div>
+          <div className="zk-embed">
+            <HotList items={snapshot.hotProjects} totalHits={snapshot.kpi.totalHits} />
+          </div>
         </div>
       </div>
     </ZsjkShell>
@@ -137,7 +156,7 @@ function IslandChart({ title, islands, field, unit, max, red }) {
         data: cats,
         axisLine: { lineStyle: { color: 'rgba(200,200,200,0.25)' } },
         axisTick: { show: false },
-        axisLabel: { color: '#7a7a7a', fontSize: 13, interval: 0, hideOverlap: true },
+        axisLabel: { color: '#7a7a7a', fontSize: 12, interval: 0, rotate: 22, hideOverlap: false },
       },
       yAxis: {
         type: 'value',
