@@ -167,7 +167,10 @@ function JoinCard() {
       <div className="zk-join-steps">
         <span>
           <b className="st">①</b>
-          <b>下载技能包</b>（hackathon-skills.tgz）解压到参赛项目根目录
+          <a className="zk-join-dl" href="/api/course-pack" download="ai-camp-course-pack.tgz" title="下载课程物料包（含参赛上报技能 + superpowers + agent-browser，已内置上报地址）">
+            下载课程物料包
+          </a>
+          ，解压到参赛项目根目录
         </span>
         <span>
           <b className="st">②</b>

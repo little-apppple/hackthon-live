@@ -386,6 +386,18 @@ async function api(method, path, body, useAuth = true) {
     );
   }
 
+  console.log(`\n== 11.5 课程物料包（/api/course-pack 公开下载 + 烘焙 server.json）==`);
+  {
+    const pack = await fetch(base + '/api/course-pack');
+    const buf = Buffer.from(await pack.arrayBuffer());
+    const gzipMagic = buf[0] === 0x1f && buf[1] === 0x8b;
+    check('物料包可公开下载（gzip 流）', pack.status === 200 && gzipMagic && buf.length > 10240, `HTTP ${pack.status} ${buf.length}B`);
+    check('下载响应带附件文件名', /attachment/.test(pack.headers.get('content-disposition') || ''));
+    // 再次下载命中缓存：字节数一致
+    const again = Buffer.from(await (await fetch(base + '/api/course-pack')).arrayBuffer());
+    check('重复下载命中缓存（内容一致）', again.length === buf.length);
+  }
+
   console.log(`\n== 12. 迭代（loop）与最终提交（submission）==`);
   {
     // 未上线项目不允许开新一轮

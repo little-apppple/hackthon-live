@@ -29,6 +29,7 @@ app.use(express.text({ type: ['text/csv', 'text/plain'], limit: '512kb' }));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api', require('./routes/report'));
 app.use('/api', require('./routes/dashboard'));
+app.use('/api', require('./course-pack'));
 app.use('/api/deploy', require('./routes/deploy'));
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));

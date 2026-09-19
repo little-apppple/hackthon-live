@@ -14,6 +14,7 @@ dashboard/
 ├─ skill/vibecoding-workflow/  # Vibe Coding 开发流程 skill（卡点与上报八节点对齐 + setup.js）
 ├─ scripts/seed.js    # 初始名单导入
 ├─ scripts/pack-skills.js # 打参赛技能包（tgz，内置上报地址，参赛者 --init 自助注册）
+├─ course-assets/    # 课程物料（可选，gitignore）：superpowers/、agent-browser/，供 /api/course-pack 打包
 ├─ scripts/smoke.js   # 端到端冒烟测试
 ├─ scripts/verify-e2e.js # 验收自动化端到端测试
 ├─ scripts/deploy-e2e.js # 自动部署端到端测试
@@ -74,6 +75,7 @@ npm run deploy:e2e     # 自动部署端到端测试（node/static/自动上报/
 - 开发模式：`npm run dev:server` + `npm run dev:web`（Vite 5173，/api 自动代理）
 - 迭代口径：`--loop` 开新一轮后进度与 KPI 按**当前轮次**统计（历史在审计流）；loop 后大屏项目卡链接暂时熄灭（进入新一轮），需在新一轮重新走到「上线部署」节点后链接才恢复（服务端部署进程在旧链接熄灭期间仍在运行，可从后台管理）
 - 技能包下发：`node scripts/pack-skills.js --server http://<对外IP>:<端口>`（`--host` 为别名）产出 `hackathon-skills.tgz`（已内置上报地址）。参赛者解压到项目根后执行 `node skill/hackathon-reporter/scripts/report.js --init`，填部门/小组/项目名即完成报名并换取 accessKey——幂等：相同「部门/小组/项目名」只发一次密钥，重复执行返回同一密钥；管理员后台手工建项目发 key 的流程继续可用（`--init --server-url … --access-key …`）。
+- 课程物料包（一整套）：`GET /api/course-pack` 公开下载（大屏首页「参赛接入」卡即此链接）。在两技能之外追加 `course-assets/superpowers`（Superpowers 技能集）与 `course-assets/agent-browser`（Agent Browser CLI），并自动烘入上报地址 + 本期注册令牌（`skill/hackathon-reporter/server.json`）。按令牌落盘缓存（`server/data/course-pack-*.tgz`），令牌轮换自动重打；删除缓存文件可强制重打。物料目录缺失时仅打包仓库自带两技能。
 
 ## Vibe Coding 开发流程 skill
 
